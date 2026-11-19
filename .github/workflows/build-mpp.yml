@@ -23,7 +23,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Build MPP bundle
+      - name: Build Android MPP bundle
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -31,10 +31,14 @@ jobs:
           ORG_GRADLE_PROJECT_gpr_key: ${{ secrets.GITHUB_TOKEN }}
         run: |
           chmod +x gradlew
-          ./gradlew :patches:build --no-daemon --stacktrace
+          ./gradlew :patches:buildAndroid :patches:generatePatchesList --no-daemon --stacktrace
+          find patches/build -maxdepth 4 -type f
 
       - name: Upload MPP Artifact
         uses: actions/upload-artifact@v4
         with:
           name: piko-12.44-custom
-          path: patches/build/libs/*.mpp
+          path: |
+            patches/build/libs/*.mpp
+            !patches/build/libs/*-javadoc.mpp
+            !patches/build/libs/*-sources.mpp
