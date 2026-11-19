@@ -431,20 +431,10 @@ private fun List<Instruction>.resolveDrawerTitleResourceIds(
     if (titleParameterIndices.size != 1) {
         throw PatchException("NewX drawer row renderer has an unexpected title parameter: $renderer")
     }
-    val titleParameterIndex = titleParameterIndices.single()
-    val titleRegister = call.startRegister + parameters.take(titleParameterIndex).sumOf { type ->
-        if (type == "J" || type == "D") 2 else 1
-    }
 
     val resourceIds = linkedSetOf<Int>()
-    for (resultIndex in 1 until callIndex) {
-        val resultInstruction = this[resultIndex]
-        if (resultInstruction.opcode != Opcode.MOVE_RESULT_OBJECT) continue
-        val resultRegister = (resultInstruction as? OneRegisterInstruction)?.registerA ?: continue
-        if (!valueReachesRegister(resultIndex, resultRegister, callIndex, titleRegister)) continue
-
-        val lookupIndex = resultIndex - 1
-        val lookupInstruction = this.getOrNull(lookupIndex) ?: continue
+    for (lookupIndex in 0 until callIndex) {
+        val lookupInstruction = this[lookupIndex]
         if (lookupInstruction.opcode != Opcode.INVOKE_STATIC &&
             lookupInstruction.opcode != Opcode.INVOKE_STATIC_RANGE
         ) continue
@@ -461,7 +451,6 @@ private fun List<Instruction>.resolveDrawerTitleResourceIds(
             lookupReference.returnType == "Ljava/lang/String;" &&
             lookupReference.parameterTypes.any { it.toString() == COMPOSER_DESCRIPTOR }
         ) {
-            // 12.44+: title lookup delegated to helper method in Lcom/x/main/drawer/ (e.g. x;->v)
             val helperMatch = Fingerprint(
                 definingClass = lookupReference.definingClass,
                 name = lookupReference.name,
@@ -474,7 +463,6 @@ private fun List<Instruction>.resolveDrawerTitleResourceIds(
 
     return resourceIds
 }
-
 private fun resolveDrawerRendererCalls(renderer: MethodReference): List<DrawerRendererCall> {
     val expectedRegisterCount = renderer.parameterTypes.sumOf { type ->
         if (type.toString() == "J" || type.toString() == "D") 2 else 1
