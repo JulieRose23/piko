@@ -174,7 +174,7 @@ private object NewXDrawerContentClassFingerprint : Fingerprint(
                 it.startsWith("Landroidx/compose/material3/") || it.startsWith(DRAWER_SCOPE)
             } &&
             parameters.count { it == COMPOSER_DESCRIPTOR } == 1 &&
-            parameters.count { it == "Ljava/util/List;" } == 1 &&
+            parameters.count { it == "Ljava/util/List;" } >= 1 &&
             parameters.count { it == "Ljava/util/Map;" } == 1 &&
             parameters.count { it == "Z" } >= 2 &&
             parameters.lastOrNull() == "I" &&
