@@ -23,6 +23,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Setup Gradle & Cache
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Build Android MPP bundle
         env:
           GITHUB_ACTOR: ${{ github.actor }}
@@ -31,8 +34,7 @@ jobs:
           ORG_GRADLE_PROJECT_gpr_key: ${{ secrets.GITHUB_TOKEN }}
         run: |
           chmod +x gradlew
-          ./gradlew :patches:buildAndroid :patches:generatePatchesList --no-daemon --stacktrace
-          find patches/build -maxdepth 4 -type f
+          ./gradlew :patches:buildAndroid :patches:generatePatchesList -x test -x javadocJar -x sourcesJar --no-daemon
 
       - name: Upload MPP Artifact
         uses: actions/upload-artifact@v4
