@@ -379,6 +379,48 @@ private data class ResolvedDrawerFooterCalls(
     val calls: List<IndexedValue<Instruction3rc>>,
 )
 
+private fun MethodReference.stringResourceIdRegisterIndex(): Int? {
+    if (returnType != "Ljava/lang/String;") return null
+    val params = parameterTypes.map(CharSequence::toString)
+    if (isStringResourceLookup()) return 1
+    // R8 outlined stringResource wrapper: (groupKey: I, resId: I, composer, composer, Z) -> String
+    if (params.size == 5 &&
+        params[0] == "I" &&
+        params[1] == "I" &&
+        params[4] == "Z" &&
+        (params[2] == COMPOSER_DESCRIPTOR || params[2].startsWith("Landroidx/compose/runtime/"))
+    ) {
+        return 1
+    }
+    return null
+}
+
+private fun List<Instruction>.extractAllStringResourceIds(): Set<Int> {
+    val namespaces =
+        indices.mapNotNull { index ->
+            val inst = this[index]
+            if (inst.opcode != Opcode.INVOKE_STATIC && inst.opcode != Opcode.INVOKE_STATIC_RANGE) return@mapNotNull null
+            val ref = inst.getReference<MethodReference>() ?: return@mapNotNull null
+            val resRegIdx = ref.stringResourceIdRegisterIndex() ?: return@mapNotNull null
+            val regs = inst.registersUsed
+            if (resRegIdx >= regs.size) return@mapNotNull null
+            resolveIntegerLiteralOnCurrentPath(index, regs[resRegIdx])
+        }.filter { it != 0 }.map { it ushr 16 }.toSet()
+
+    val ids = linkedSetOf<Int>()
+    indices.forEach { index ->
+        val inst = this[index]
+        if (inst.opcode != Opcode.INVOKE_STATIC && inst.opcode != Opcode.INVOKE_STATIC_RANGE) return@forEach
+        val ref = inst.getReference<MethodReference>() ?: return@forEach
+        val resRegIdx = ref.stringResourceIdRegisterIndex() ?: return@forEach
+        val regs = inst.registersUsed
+        if (resRegIdx >= regs.size) return@forEach
+        resolveIntegerLiterals(index, regs[resRegIdx])
+            .filterTo(ids) { id -> id != 0 && (namespaces.isEmpty() || id ushr 16 in namespaces) }
+    }
+    return ids
+}
+
 private fun List<Instruction>.resolveDrawerTitleResourceIds(
     callIndex: Int,
     call: Instruction3rc,
@@ -394,23 +436,6 @@ private fun List<Instruction>.resolveDrawerTitleResourceIds(
         if (type == "J" || type == "D") 2 else 1
     }
 
-    val stringResourceNamespaces =
-        indices.mapNotNull { index ->
-            val lookupInstruction = this[index]
-            if (lookupInstruction.opcode != Opcode.INVOKE_STATIC &&
-                lookupInstruction.opcode != Opcode.INVOKE_STATIC_RANGE
-            ) {
-                return@mapNotNull null
-            }
-            val lookupReference = lookupInstruction.getReference<MethodReference>() ?: return@mapNotNull null
-            if (!lookupReference.isStringResourceLookup()) return@mapNotNull null
-            val registers = lookupInstruction.registersUsed
-            if (registers.size != 2) return@mapNotNull null
-            resolveIntegerLiteralOnCurrentPath(index, registers[1])
-        }.filter { it != 0 }
-        .map { it ushr 16 }
-        .toSet()
-
     val resourceIds = linkedSetOf<Int>()
     for (resultIndex in 1 until callIndex) {
         val resultInstruction = this[resultIndex]
@@ -424,14 +449,27 @@ private fun List<Instruction>.resolveDrawerTitleResourceIds(
             lookupInstruction.opcode != Opcode.INVOKE_STATIC_RANGE
         ) continue
         val lookupReference = lookupInstruction.getReference<MethodReference>() ?: continue
-        if (!lookupReference.isStringResourceLookup()) continue
 
-        val registers = lookupInstruction.registersUsed
-        if (registers.size != 2) continue
-        resolveIntegerLiterals(lookupIndex, registers[1])
-            .filterTo(resourceIds) { resourceId ->
-                resourceId != 0 && resourceId ushr 16 in stringResourceNamespaces
+        val resRegIdx = lookupReference.stringResourceIdRegisterIndex()
+        if (resRegIdx != null) {
+            val registers = lookupInstruction.registersUsed
+            if (resRegIdx < registers.size) {
+                resolveIntegerLiterals(lookupIndex, registers[resRegIdx])
+                    .filterTo(resourceIds) { it != 0 && (it ushr 16) == 0x7f13 }
             }
+        } else if (lookupReference.definingClass.startsWith(DRAWER_SCOPE) &&
+            lookupReference.returnType == "Ljava/lang/String;" &&
+            lookupReference.parameterTypes.any { it.toString() == COMPOSER_DESCRIPTOR }
+        ) {
+            // 12.44+: title lookup delegated to helper method in Lcom/x/main/drawer/ (e.g. x;->v)
+            val helperMatch = Fingerprint(
+                definingClass = lookupReference.definingClass,
+                name = lookupReference.name,
+                returnType = lookupReference.returnType,
+                parameters = lookupReference.parameterTypes.map(CharSequence::toString),
+            ).matchOrNull()
+            helperMatch?.method?.instructions?.extractAllStringResourceIds()?.let { resourceIds += it }
+        }
     }
 
     return resourceIds
