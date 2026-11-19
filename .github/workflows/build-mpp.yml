@@ -1,0 +1,31 @@
+name: Build Custom MPP
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Build MPP bundle
+        run: |
+          chmod +x gradlew
+          ./gradlew :patches:build --no-daemon
+
+      - name: Upload MPP Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: piko-12.44-custom
+          path: patches/build/libs/*.mpp
