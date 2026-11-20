@@ -1022,6 +1022,24 @@ private data class ProfileRowAnchor(
  * and the emission.
  */
 private fun MutableMethod.findProfileRowCall(): ProfileRowAnchor {
+    val dynamicCandidates = buildList {
+        classDefForEach { classDef ->
+            if (!classDef.type.startsWith(DRAWER_SCOPE)) return@classDefForEach
+            val mutableClass = mutableClassDefBy(classDef.type)
+            mutableClass.methods
+                .filter { m -> m.parameterTypes.firstOrNull()?.toString() == "Lcom/x/main/api/landing/x;" }
+                .forEach { method ->
+                    method.instructions.forEachIndexed { index, inst ->
+                        if (inst.opcode != Opcode.INVOKE_STATIC_RANGE) return@forEachIndexed
+                        val call = inst as? Instruction3rc ?: return@forEachIndexed
+                        val renderer = inst.getReference<MethodReference>() ?: return@forEachIndexed
+                        if (!renderer.isDrawerRowRenderer() || call.registerCount != renderer.parameterTypes.size) return@forEachIndexed
+                        add(ProfileRowAnchor(DrawerFooterTarget(method, index, call, renderer), renderer))
+                    }
+                }
+        }
+    }
+    if (dynamicCandidates.size == 1) return dynamicCandidates.single()
     val profileTitleId = resourceId(ResourceType.STRING, "drawer_profile_title")
     val candidates = instructions.indices.mapNotNull { index ->
         val instruction = instructions[index]
@@ -1485,6 +1503,20 @@ val customizeNewXDrawerPatch =
             // the instruction currently following the anchor as its skip target, so
             // injecting Grok first chains the fallthrough correctly.
             val profileAnchor = footerTarget.method.findProfileRowCall()
+            val profileMethod = profileAnchor.target.method
+            if (profileMethod.parameterTypes.firstOrNull()?.toString() == "Lcom/x/main/api/landing/x;") {
+                val itemParamReg = profileMethod.p0Register
+                val callEndReg = profileAnchor.target.call.startRegister + profileAnchor.target.call.registerCount
+                profileMethod.insertHook(
+                    index = profileAnchor.target.callIndex + 1,
+                    excludedRegisters = (profileAnchor.target.call.startRegister until callEndReg).toList() + itemParamReg,
+                    relocateBranchTargets = false,
+                ) {
+                    val profileSingletonReg = scratchRegister()
+                    sget(profileSingletonReg, fieldReference("Lcom/x/main/api/landing/c0;->a:Lcom/x/main/api/landing/c0;"))
+                    ifNe(itemParamReg, profileSingletonReg, Target.Original)
+                }
+            }
             footerTarget.method.injectPikoSettingsDrawerItem(
                 target = footerTarget,
                 renderer = footerTarget.renderer,
@@ -1494,7 +1526,7 @@ val customizeNewXDrawerPatch =
             )
             // Null toggle: the title provider returns null while disabled, so no setting
             // read register is needed at this dense call site.
-            footerTarget.method.injectAdditionalDrawerRow(
+            profileMethod.injectAdditionalDrawerRow(
                 target = profileAnchor.target,
                 renderer = profileAnchor.renderer,
                 icon = DrawerRowIcon.Field(notificationsIcon),
@@ -1502,7 +1534,7 @@ val customizeNewXDrawerPatch =
                 titleDescriptor = "$DRAWER_TAB_OPENER_DESCRIPTOR->getNotificationsTitle()Ljava/lang/String;",
                 clickDescriptor = "$DRAWER_TAB_OPENER_DESCRIPTOR->getNotificationsClickHandler()$FUNCTION0_DESCRIPTOR",
             )
-            footerTarget.method.injectAdditionalDrawerRow(
+            profileMethod.injectAdditionalDrawerRow(
                 target = profileAnchor.target,
                 renderer = profileAnchor.renderer,
                 icon = DrawerRowIcon.Field(grokIcon),
@@ -1510,7 +1542,7 @@ val customizeNewXDrawerPatch =
                 titleDescriptor = "$DRAWER_TAB_OPENER_DESCRIPTOR->getGrokTitle()Ljava/lang/String;",
                 clickDescriptor = "$DRAWER_TAB_OPENER_DESCRIPTOR->getGrokClickHandler()$FUNCTION0_DESCRIPTOR",
             )
-            footerTarget.method.injectAdditionalDrawerRow(
+            profileMethod.injectAdditionalDrawerRow(
                 target = profileAnchor.target,
                 renderer = profileAnchor.renderer,
                 icon = DrawerRowIcon.Field(messagesIcon),
