@@ -1085,17 +1085,24 @@ private fun resolveInlineActionKindLayoutLambda(
 internal fun resolveInlineActionKindLayoutMethod(
     methods: Collection<Method>,
     actionTypeField: FieldReference,
-): Method = requireExactlyOne(
-    "NewX inline-action kind layout lambda",
-    methods.filter { method ->
+): Method {
+    val matchingMethods = methods.filter { method ->
         method.definingClass.startsWith(INLINE_ACTION_BAR_SCOPE) &&
             method.name == "invoke" && method.returnType == "Ljava/lang/Object;" &&
             method.implementation?.instructions?.any { instruction ->
                 instruction.opcode == Opcode.IGET_OBJECT &&
                     instruction.getReference<FieldReference>()?.toString() == actionTypeField.toString()
             } == true
-    },
-)
+    }
+    val withEnumKind = matchingMethods.filter { method ->
+        runCatching { resolveInlineActionEnumKindConstructor(method) }.isSuccess
+    }
+    val candidates = withEnumKind.ifEmpty { matchingMethods }
+    return requireExactlyOne(
+        "NewX inline-action kind layout lambda",
+        candidates,
+    )
+}
 
 private fun resolveInlineActionKindOverride(
     entryModels: ResolvedNewXInlineActionModels,
