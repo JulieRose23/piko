@@ -632,110 +632,30 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
 ): ResolvedForYouCurrentPageRefreshBridge? {
     val instructions = implementation?.instructions?.toList() ?: return null
 
-    fun fieldAt(index: Int): FieldReference? =
-        instructions[index].getReference<FieldReference>()
-
-    fun typeAt(index: Int): String? =
-        instructions[index].getReference<TypeReference>()?.type
-
-    fun methodAt(index: Int): MethodReference? =
-        instructions[index].getReference<MethodReference>()
-
-    val allFields = instructions.mapNotNull { it.getReference<FieldReference>() }
-        .distinctBy(FieldReference::toString)
-    val allMethods = instructions.mapNotNull { it.getReference<MethodReference>() }
-        .distinctBy(MethodReference::toString)
-    val allTypes = instructions.mapNotNull { it.getReference<TypeReference>()?.type }
-        .distinct()
-
-    val stateField = allFields.firstOrNull { field ->
-        field.definingClass == definingClass &&
-            allMethods.any { m ->
-                m.definingClass == field.type &&
-                    m.returnType == OBJECT_DESCRIPTOR &&
-                    m.parameterTypes.isEmpty()
-            }
-    } ?: return null
-
-    val stateGetter = allMethods.firstOrNull { m ->
-        m.definingClass == stateField.type &&
-            m.returnType == OBJECT_DESCRIPTOR &&
-            m.parameterTypes.isEmpty()
-    } ?: return null
-
-    val pagesListField = allFields.firstOrNull { f -> f.type == OBJECT_LIST_DESCRIPTOR }
-        ?: return null
-    val pagesType = typeAt(
-        instructions.indexOfFirst { inst ->
-            inst.opcode == Opcode.CHECK_CAST &&
-                typeAt(instructions.indexOf(inst))?.contains("pages") == true
-        }.takeIf { it >= 0 } ?: -1
-    ) ?: pagesListField.definingClass
-
-    val pagesIndexField = allFields.firstOrNull { f ->
-        f.type == INTEGER_DESCRIPTOR && f.definingClass.startsWith("Lcom/x/home/")
-    } ?: allFields.firstOrNull { f ->
-        f.type == INTEGER_DESCRIPTOR
-    } ?: return null
-
-    val pageLookup = allMethods.firstOrNull { m ->
-        m.name == "get" &&
-            m.returnType == OBJECT_DESCRIPTOR &&
-            m.parameterTypes.map(CharSequence::toString) == listOf(INTEGER_DESCRIPTOR)
-    } ?: return null
-
-    val forYouComponentType = allTypes.firstOrNull { t ->
-        t.startsWith("Lcom/x/home/foryou/")
-    } ?: allTypes.firstOrNull { t ->
-        t.startsWith("Lcom/x/home/") && !t.contains("tabbed")
-    } ?: "Lcom/x/home/foryou/x;"
-
-    val componentType = allTypes.firstOrNull { t ->
-        t != pagesType &&
-            t != forYouComponentType &&
-            allMethods.any { m ->
-                m.definingClass == t &&
-                    m.returnType == OBJECT_DESCRIPTOR &&
-                    m.parameterTypes.isEmpty()
-            }
-    } ?: stateField.type
-
-    val componentGetter = allMethods.firstOrNull { m ->
-        m.definingClass == componentType &&
-            m.returnType == OBJECT_DESCRIPTOR &&
-            m.parameterTypes.isEmpty()
-    } ?: stateGetter
-
-    val refreshDispatch = allMethods.firstOrNull { m ->
-        m.returnType == "V" &&
-            m.parameterTypes.size == 1 &&
-            m.parameterTypes.single().toString() in clearAndRefreshEvent.dispatchParameterTypes
-    } ?: return null
-
-    val forYouControllerField = allFields.firstOrNull { f ->
-        f.type == refreshDispatch.definingClass
-    } ?: allFields.firstOrNull { f ->
-        f.definingClass == forYouComponentType &&
-            !f.type.startsWith("Ljava/") &&
-            !f.type.startsWith("Lkotlinx/") &&
-            !f.type.startsWith("Landroid/")
-    } ?: allFields.firstOrNull { f ->
-        f.definingClass == definingClass && f.type.startsWith("Lcom/x/home/")
-    } ?: stateField
-
-    return ResolvedForYouCurrentPageRefreshBridge(
-        stateField = stateField,
-        stateGetter = stateGetter,
-        pagesType = pagesType,
-        pagesListField = pagesListField,
-        pagesIndexField = pagesIndexField,
-        pageLookup = pageLookup,
-        componentType = componentType,
-        componentGetter = componentGetter,
-        forYouComponentType = forYouComponentType,
-        forYouControllerField = forYouControllerField,
-        refreshDispatch = refreshDispatch,
-    )
+    if (definingClass == "Lcom/x/home/tabbed/s;") {
+        val hasDispatch = instructions.any { inst ->
+            val m = inst.getReference<MethodReference>()
+            m != null &&
+                m.returnType == "V" &&
+                m.parameterTypes.size == 1 &&
+                m.parameterTypes.single().toString() in clearAndRefreshEvent.dispatchParameterTypes
+        }
+        val hasPagesList = instructions.any { inst ->
+            val f = inst.getReference<FieldReference>()
+            f != null && f.type == OBJECT_LIST_DESCRIPTOR
+        }
+        if (hasDispatch || hasPagesList) {
+            val refs = instructions.mapNotNull { inst ->
+                inst.getReference<MethodReference>()?.toString()
+                    ?: inst.getReference<FieldReference>()?.toString()
+                    ?: inst.getReference<TypeReference>()?.type
+            }.distinct().joinToString(" | ")
+            throw PatchException(
+                "[METHOD_MATCH] $definingClass->$name(hasDispatch=$hasDispatch, hasPagesList=$hasPagesList) => $refs"
+            )
+        }
+    }
+    return null
 }
 /**
  * Re-dispatches a refresh of the For You page that is currently shown.
