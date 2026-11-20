@@ -715,8 +715,13 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
     val forYouControllerField = allFields.firstOrNull { f ->
         f.type == refreshDispatch.definingClass
     } ?: allFields.firstOrNull { f ->
-        f.definingClass == forYouComponentType && !f.type.startsWith("Ljava/") && !f.type.startsWith("Lkotlinx/")
-    } ?: return null
+        f.definingClass == forYouComponentType &&
+            !f.type.startsWith("Ljava/") &&
+            !f.type.startsWith("Lkotlinx/") &&
+            !f.type.startsWith("Landroid/")
+    } ?: allFields.firstOrNull { f ->
+        f.definingClass == definingClass && f.type.startsWith("Lcom/x/home/")
+    } ?: stateField
 
     return ResolvedForYouCurrentPageRefreshBridge(
         stateField = stateField,
