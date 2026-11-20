@@ -1090,12 +1090,7 @@ private fun resolveDrawerTabNavigation(
     // Read-only discovery pass; see the navigation bar patch for why mutable proxies are avoided.
     val dispatcherMatch =
         Fingerprint(
-            name = "invoke",
-            returnType = OBJECT_DESCRIPTOR,
-            parameters = emptyList(),
             filters = listOf(
-                // Dispatch switch in the prologue.
-                opcode(Opcode.PACKED_SWITCH),
                 // Communities case.
                 fieldAccess(
                     opcode = Opcode.SGET_OBJECT,
@@ -1121,11 +1116,10 @@ private fun resolveDrawerTabNavigation(
         ).matchAll(1..1).single()
     val dispatcher = dispatcherMatch.originalMethod
     val dispatcherInstructions = dispatcher.instructions.toList()
-    val switchIndex = dispatcherMatch.instructionMatches[0].index
-    val communitiesIndex = dispatcherMatch.instructionMatches[1].index
-    val tabChangeMatch = dispatcherMatch.instructionMatches[2]
+    val communitiesIndex = dispatcherMatch.instructionMatches[0].index
+    val tabChangeMatch = dispatcherMatch.instructionMatches[1]
     val tabChangeIndex = tabChangeMatch.index
-    val closerMatch = dispatcherMatch.instructionMatches[3]
+    val closerMatch = dispatcherMatch.instructionMatches[2]
     val closerIndex = closerMatch.index
     // The Communities case ends at the first return. A tab change or closer after it belongs to
     // a later click handler.
@@ -1184,7 +1178,7 @@ private fun resolveDrawerTabNavigation(
     // load because other case blocks reuse the same registers, so each shape is resolved by
     // position and the combined cardinality is asserted.
     val prologueArgFields = dispatcherInstructions.indices.mapNotNull { index ->
-        if (index >= switchIndex) return@mapNotNull null
+        if (index >= closerIndex) return@mapNotNull null
         val instruction = dispatcherInstructions[index]
         if (instruction.opcode != Opcode.SGET_OBJECT) return@mapNotNull null
         instruction.getReference<FieldReference>()
