@@ -1145,7 +1145,7 @@ private fun resolveDrawerTabNavigation(
         requireExactlyOne(
             label = "NewX drawer close field",
             candidates = dispatcherInstructions.indices.filter { index ->
-                if (index <= tabChangeIndex || index >= closerIndex) return@filter false
+                if (index >= closerIndex) return@filter false
                 val instruction = dispatcherInstructions[index]
                 if (instruction.opcode != Opcode.IGET_OBJECT) return@filter false
                 val destination = (instruction as? TwoRegisterInstruction)?.registerA
