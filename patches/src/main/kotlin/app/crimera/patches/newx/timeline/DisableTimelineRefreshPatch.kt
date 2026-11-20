@@ -263,8 +263,8 @@ val disableTimelineRefreshPatch =
                     relocateBranchTargets = true,
                 ) {
                     ifEqz(read.register, Target.Original)
-                    constInt(read.register, 0)
-                    returnValue(read.register)
+                    constNull(read.register)
+                    returnObject(read.register)
                 }
             }
 
