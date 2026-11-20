@@ -38,7 +38,7 @@ import com.android.tools.smali.dexlib2.iface.reference.MethodReference
 private const val MEDIA_SHEET_FILTER_SIGNATURE =
     "filter(Ljava/util/List;Ljava/util/Set;)Ljava/util/List;"
 private const val LABEL_BRIDGE_NAME = "getLabelResourceId"
-private const val IMMUTABLE_LIST_DESCRIPTOR = "Lkotlinx/collections/immutable/b;"
+private const val IMMUTABLE_LIST_PREFIX = "Lkotlinx/collections/immutable/"
 private const val ITERABLE_DESCRIPTOR = "Ljava/lang/Iterable;"
 private const val INT_DESCRIPTOR = "I"
 private const val OBJECT_DESCRIPTOR = "Ljava/lang/Object;"
@@ -252,7 +252,7 @@ private fun filterMediaSheetOptions(
             val reference = instruction.getReference<MethodReference>() ?: return@mapIndexedNotNull null
             val parameters = reference.parameterTypes.map(CharSequence::toString)
             (index to reference).takeIf {
-                reference.returnType == IMMUTABLE_LIST_DESCRIPTOR &&
+                reference.returnType.startsWith(IMMUTABLE_LIST_PREFIX) &&
                     parameters.size == 1 &&
                     parameters[0] == ITERABLE_DESCRIPTOR
             }
@@ -301,7 +301,7 @@ private fun filterMediaSheetOptions(
         // The sheet renderer expects the app's immutable list type, so reuse the resolved
         // conversion instead of handing it the extension's ArrayList.
         invokeStatic(conversionReference, resultRegister)
-        moveResult(resultRegister, IMMUTABLE_LIST_DESCRIPTOR)
+        moveResult(resultRegister, conversionReference.returnType)
     }
 }
 
