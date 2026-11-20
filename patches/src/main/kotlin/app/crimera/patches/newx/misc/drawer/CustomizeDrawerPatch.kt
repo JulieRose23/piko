@@ -863,7 +863,7 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
 ) {
     val iconParamIndex = renderer.parameterTypes.indexOfFirst { it.toString().startsWith("Lcom/x/icons/") }
     if (iconParamIndex == 0) {
-        // 12.44+ dynamic footer loop: only inject once right after the Settings item (icon == settingsIconField)
+        // 12.44+ dynamic footer loop: emit Piko Settings at most once per drawer build pass
         val currentIconReg = target.call.startRegister
         insertHook(
             index = target.callIndex + 1,
@@ -871,8 +871,11 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
             relocateBranchTargets = false,
         ) {
             val expectedIconReg = scratchRegister()
+            val shouldInjectReg = scratchRegister()
             sget(expectedIconReg, settingsIconField)
             ifNe(currentIconReg, expectedIconReg, Target.Original)
+            invokeStatic(shouldInjectReg, "$COMPOSE_SETTINGS_HOOK_DESCRIPTOR->shouldInjectDrawerPikoSettings()Z")
+            ifEqz(shouldInjectReg, Target.Original)
         }
     }
     injectAdditionalDrawerRow(
