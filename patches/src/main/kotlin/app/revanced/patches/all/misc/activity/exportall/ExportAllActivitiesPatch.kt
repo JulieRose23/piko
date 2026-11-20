@@ -1,6 +1,6 @@
 package app.revanced.patches.all.misc.activity.exportall
 
-import app.crimera.patches.twitter.utils.Constants.COMPATIBILITY_X
+import app.crimera.patches.newx.utils.Constants.COMPATIBILITY_NEW_X
 import app.morphe.patcher.patch.document
 import app.morphe.patcher.patch.patch
 
@@ -11,7 +11,7 @@ val exportAllActivitiesPatch =
         description = "Makes all app activities exportable.",
         default = false,
     ) {
-        compatibleWith(COMPATIBILITY_X)
+        compatibleWith(COMPATIBILITY_NEW_X)
         category("Old patches")
 
         execute {
