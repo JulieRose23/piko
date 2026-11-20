@@ -985,6 +985,7 @@ private fun MutableMethod.injectSnapshotDrawerRow(
     val clickRegister = startRegister + clickIndex
     insertHook(
         index = insertionIndex,
+        excludedRegisters = (startRegister..endRegister).toList(),
         // The block renders with the anchor call's register window, so a branch that skipped the
         // anchor has to keep jumping to the original instruction instead of into the block.
         relocateBranchTargets = false,
