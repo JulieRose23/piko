@@ -682,12 +682,7 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
         m.name == "get" &&
             m.returnType == OBJECT_DESCRIPTOR &&
             m.parameterTypes.map(CharSequence::toString) == listOf(INTEGER_DESCRIPTOR)
-    } ?: MethodReference(
-        definingClass = LIST_DESCRIPTOR,
-        name = "get",
-        parameterTypes = listOf(INTEGER_DESCRIPTOR),
-        returnType = OBJECT_DESCRIPTOR,
-    )
+    } ?: return null
 
     val forYouComponentType = allTypes.firstOrNull { t ->
         t.startsWith("Lcom/x/home/foryou/")
@@ -721,11 +716,7 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
         f.type == refreshDispatch.definingClass
     } ?: allFields.firstOrNull { f ->
         f.definingClass == forYouComponentType && !f.type.startsWith("Ljava/") && !f.type.startsWith("Lkotlinx/")
-    } ?: FieldReference(
-        definingClass = forYouComponentType,
-        name = "controller",
-        type = refreshDispatch.definingClass,
-    )
+    } ?: return null
 
     return ResolvedForYouCurrentPageRefreshBridge(
         stateField = stateField,
