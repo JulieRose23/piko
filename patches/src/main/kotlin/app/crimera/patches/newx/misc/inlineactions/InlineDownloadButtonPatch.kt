@@ -933,19 +933,23 @@ private fun resolveInlineLongPressEventType(
             it.name == "<init>" && it.parameterTypes.map(CharSequence::toString) == listOf(actionEntryDescriptor)
         },
     )
+    val allCallbacks = Fingerprint(
+        // The callback constructs the event and immediately sends it to Function1.
+        filters = listOf(
+            newInstance(constructor.definingClass),
+            methodCall(reference = constructor, location = MatchAfterImmediately()),
+            methodCall(
+                smali = "Lkotlin/jvm/functions/Function1;->invoke(Ljava/lang/Object;)Ljava/lang/Object;",
+                location = MatchAfterImmediately(),
+            ),
+        ),
+    ).scopedMatchAll()
+    val inlineBarCallbacks = allCallbacks.filter { match ->
+        match.method.definingClass.startsWith("Lcom/x/inlineactionbar/")
+    }
     requireExactlyOne(
         "NewX inline-action long-press callback dispatch",
-        Fingerprint(
-            // The callback constructs the event and immediately sends it to Function1.
-            filters = listOf(
-                newInstance(constructor.definingClass),
-                methodCall(reference = constructor, location = MatchAfterImmediately()),
-                methodCall(
-                    smali = "Lkotlin/jvm/functions/Function1;->invoke(Ljava/lang/Object;)Ljava/lang/Object;",
-                    location = MatchAfterImmediately(),
-                ),
-            ),
-        ).scopedMatchAll(),
+        inlineBarCallbacks.ifEmpty { allCallbacks },
     )
     return eventClass.type
 }
