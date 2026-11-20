@@ -1512,9 +1512,11 @@ val customizeNewXDrawerPatch =
                     excludedRegisters = (profileAnchor.target.call.startRegister until callEndReg).toList() + itemParamReg,
                     relocateBranchTargets = false,
                 ) {
+                    val lowItemReg = scratchRegister()
                     val profileSingletonReg = scratchRegister()
+                    move(lowItemReg, itemParamReg, "Lcom/x/main/api/landing/x;")
                     sget(profileSingletonReg, fieldReference("Lcom/x/main/api/landing/c0;->a:Lcom/x/main/api/landing/c0;"))
-                    ifNe(itemParamReg, profileSingletonReg, Target.Original)
+                    ifNe(lowItemReg, profileSingletonReg, Target.Original)
                 }
             }
             footerTarget.method.injectPikoSettingsDrawerItem(
