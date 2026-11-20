@@ -632,166 +632,29 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
 ): ResolvedForYouCurrentPageRefreshBridge? {
     val instructions = implementation?.instructions?.toList() ?: return null
 
-    fun fieldAt(index: Int): FieldReference? =
-        instructions[index].getReference<FieldReference>()
-
-    fun typeAt(index: Int): String? =
-        instructions[index].getReference<TypeReference>()?.type
-
-    fun methodAt(index: Int): MethodReference? =
-        instructions[index].getReference<MethodReference>()
-
-    val stateFields = instructions.withIndex()
-        .filter { (_, instruction) -> instruction.opcode == Opcode.IGET_OBJECT }
-        .mapNotNull { (index, _) -> fieldAt(index) }
-        .filter { field ->
-            field.definingClass == definingClass &&
-                instructions.any { instruction ->
-                    if (instruction.opcode != Opcode.INVOKE_VIRTUAL) return@any false
-                    val reference = instruction.getReference<MethodReference>() ?: return@any false
-                    reference.definingClass == field.type &&
-                        reference.returnType == OBJECT_DESCRIPTOR &&
-                        reference.parameterTypes.isEmpty()
-                }
-        }
-        .distinctBy(FieldReference::toString)
-    if (stateFields.isEmpty()) return null
-    val stateField = stateFields.first()
-
-    val stateGetters = instructions.withIndex()
-        .filter { (_, instruction) -> instruction.opcode == Opcode.INVOKE_VIRTUAL }
-        .mapNotNull { (index, _) ->
-            val reference = instructions[index].getReference<MethodReference>() ?: return@mapNotNull null
-            reference.takeIf {
-                it.definingClass == stateField.type &&
-                    it.returnType == OBJECT_DESCRIPTOR &&
-                    it.parameterTypes.isEmpty()
-            }
-        }
-        .distinctBy(MethodReference::toString)
-    if (stateGetters.isEmpty()) return null
-    val stateGetter = stateGetters.first()
-
-    val pagesCastCandidates = instructions.withIndex()
-        .filter { (index, instruction) ->
-            if (instruction.opcode != Opcode.CHECK_CAST) return@filter false
-            val candidateType = typeAt(index) ?: return@filter false
-            val hasListField = instructions.any { inst ->
-                inst.opcode == Opcode.IGET_OBJECT &&
-                    inst.getReference<FieldReference>()?.let { field ->
-                        field.definingClass == candidateType && field.type == OBJECT_LIST_DESCRIPTOR
-                    } == true
-            }
-            val getterCalledBefore = (maxOf(0, index - 8) until index).any { prevIdx ->
-                methodAt(prevIdx)?.matches(stateGetter) == true
-            }
-            hasListField && getterCalledBefore
-        }
-    if (pagesCastCandidates.isEmpty()) return null
-    val pagesCastIndex = pagesCastCandidates.first().index
-    val pagesType = typeAt(pagesCastIndex) ?: return null
-
-    val pagesListFields = instructions.withIndex()
-        .filter { (_, instruction) -> instruction.opcode == Opcode.IGET_OBJECT }
-        .mapNotNull { (index, _) -> fieldAt(index) }
-        .filter { field -> field.definingClass == pagesType && field.type == OBJECT_LIST_DESCRIPTOR }
-        .distinctBy(FieldReference::toString)
-    if (pagesListFields.size != 1) return null
-    val pagesListField = pagesListFields[0]
-
-    val pagesIndexFields = instructions.withIndex()
-        .filter { (_, instruction) -> instruction.opcode == Opcode.IGET }
-        .mapNotNull { (index, _) -> fieldAt(index) }
-        .filter { field -> field.definingClass == pagesType && field.type == INTEGER_DESCRIPTOR }
-        .distinctBy(FieldReference::toString)
-    if (pagesIndexFields.size != 1) return null
-    val pagesIndexField = pagesIndexFields[0]
-
-    val pagesListRegisterCandidates = instructions.withIndex()
-        .filter { (_, instruction) ->
-            instruction.getReference<FieldReference>()?.toString() == pagesListField.toString()
-        }
-        .mapNotNull { (_, instruction) -> instruction as? TwoRegisterInstruction }
-    if (pagesListRegisterCandidates.isEmpty()) return null
-    val listRegs = pagesListRegisterCandidates.map { it.registerA }.toSet()
-
-    val pageLookupCandidates = instructions.withIndex()
-        .filter { (_, instruction) ->
-            instruction.opcode == Opcode.INVOKE_INTERFACE || instruction.opcode == Opcode.INVOKE_VIRTUAL
-        }
-        .mapNotNull { (index, instruction) ->
-            val reference = instruction.getReference<MethodReference>() ?: return@mapNotNull null
-            if (reference.name != "get" ||
-                reference.returnType != OBJECT_DESCRIPTOR ||
-                reference.parameterTypes.map(CharSequence::toString) != listOf(INTEGER_DESCRIPTOR)
-            ) {
-                return@mapNotNull null
-            }
-            val score = if (instruction.registersUsed.any { it in listRegs }) 2 else 1
-            Triple(score, index, reference)
-        }
-        .sortedByDescending { it.first }
-    if (pageLookupCandidates.isEmpty()) return null
-    val (_, pageLookupIndex, pageLookup) = pageLookupCandidates.first()
-
-    val componentCastEntry = (pageLookupIndex + 1 until minOf(instructions.size, pageLookupIndex + 8))
-        .firstNotNullOfOrNull { idx ->
-            if (instructions[idx].opcode != Opcode.CHECK_CAST) return@firstNotNullOfOrNull null
-            val castType = typeAt(idx) ?: return@firstNotNullOfOrNull null
-            val getterIdx = (idx + 1 until minOf(instructions.size, idx + 6)).firstOrNull { gIdx ->
-                if (instructions[gIdx].opcode != Opcode.INVOKE_VIRTUAL) return@firstOrNull false
-                val ref = methodAt(gIdx) ?: return@firstOrNull false
-                ref.definingClass == castType &&
-                    ref.returnType == OBJECT_DESCRIPTOR &&
-                    ref.parameterTypes.isEmpty()
-            } ?: return@firstNotNullOfOrNull null
-            Triple(idx, castType, methodAt(getterIdx)!!)
-        } ?: return null
-    val (componentCastIndex, componentType, componentGetter) = componentCastEntry
-
-    val forYouInstanceOfIndex = (componentCastIndex + 1 until minOf(instructions.size, componentCastIndex + 10))
-        .firstOrNull { idx -> instructions[idx].opcode == Opcode.INSTANCE_OF }
-        ?: return null
-    val forYouComponentType = typeAt(forYouInstanceOfIndex) ?: return null
-
-    val forYouControllerFields = instructions.withIndex()
-        .drop(forYouInstanceOfIndex + 1)
-        .filter { (_, instruction) -> instruction.opcode == Opcode.IGET_OBJECT }
-        .mapNotNull { (index, _) -> fieldAt(index) }
-        .filter { field -> field.definingClass == forYouComponentType }
-        .distinctBy(FieldReference::toString)
-    if (forYouControllerFields.isEmpty()) return null
-    val forYouControllerField = forYouControllerFields.first()
-
-    val refreshDispatches = instructions.withIndex()
-        .drop(forYouInstanceOfIndex + 1)
-        .filter { (_, instruction) -> instruction.opcode == Opcode.INVOKE_INTERFACE }
-        .mapNotNull { (index, _) ->
-            val reference = instructions[index].getReference<MethodReference>() ?: return@mapNotNull null
-            reference.takeIf {
-                it.definingClass == forYouControllerField.type &&
-                    it.returnType == "V" &&
-                    it.parameterTypes.size == 1 &&
-                    it.parameterTypes.single().toString() in
-                        clearAndRefreshEvent.dispatchParameterTypes
-            }
-        }
-        .distinctBy(MethodReference::toString)
-    if (refreshDispatches.isEmpty()) return null
-
-    return ResolvedForYouCurrentPageRefreshBridge(
-        stateField = stateField,
-        stateGetter = stateGetter,
-        pagesType = pagesType,
-        pagesListField = pagesListField,
-        pagesIndexField = pagesIndexField,
-        pageLookup = pageLookup,
-        componentType = componentType,
-        componentGetter = componentGetter,
-        forYouComponentType = forYouComponentType,
-        forYouControllerField = forYouControllerField,
-        refreshDispatch = refreshDispatches.first(),
-    )
+    if ("$definingClass->$name" == "Lcom/x/home/tabbed/s;->g") {
+        val igets = instructions.mapNotNull { it.getReference<FieldReference>() }
+            .filter { it.type.contains("List") || it.definingClass.startsWith("Lcom/x/home/") }
+            .distinctBy { it.toString() }
+            .joinToString(" | ")
+        val invInterfaces = instructions.filter { it.opcode == Opcode.INVOKE_INTERFACE }
+            .mapNotNull { it.getReference<MethodReference>() }
+            .distinctBy { it.toString() }
+            .joinToString(" | ")
+        val invVirtuals = instructions.filter { it.opcode == Opcode.INVOKE_VIRTUAL }
+            .mapNotNull { it.getReference<MethodReference>() }
+            .filter { it.parameterTypes.isEmpty() && it.returnType == OBJECT_DESCRIPTOR }
+            .distinctBy { it.toString() }
+            .joinToString(" | ")
+        val types = instructions.mapNotNull { it.getReference<TypeReference>()?.type }
+            .distinct()
+            .joinToString(" | ")
+        throw PatchException(
+            "[DUMP s->g] dispatches=${clearAndRefreshEvent.dispatchParameterTypes} || " +
+                "igets=[$igets] || invVirt0=[$invVirtuals] || invIntf=[$invInterfaces] || types=[$types]"
+        )
+    }
+    return null
 }
 /**
  * Re-dispatches a refresh of the For You page that is currently shown.
