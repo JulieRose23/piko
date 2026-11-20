@@ -874,7 +874,8 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
             val shouldInjectReg = scratchRegister()
             sget(expectedIconReg, settingsIconField)
             ifNe(currentIconReg, expectedIconReg, Target.Original)
-            invokeStatic(shouldInjectReg, "$COMPOSE_SETTINGS_HOOK_DESCRIPTOR->shouldInjectDrawerPikoSettings()Z")
+            invokeStatic(methodReference("$COMPOSE_SETTINGS_HOOK_DESCRIPTOR->shouldInjectDrawerPikoSettings()Z"))
+            moveResult(shouldInjectReg, "Z")
             ifEqz(shouldInjectReg, Target.Original)
         }
     }
