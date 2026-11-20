@@ -111,7 +111,7 @@ private data class ResolvedForYouRequestTarget(
 private data class ResolvedForYouTabHook(
     val method: MutableMethod,
     val insertionIndex: Int,
-    val refreshBridge: ResolvedForYouCurrentPageRefreshBridge,
+    val refreshBridge: ResolvedForYouCurrentPageRefreshBridge?,
     val forYouPageRegister: Int,
     val forYouSingletonField: FieldReference,
     val reservedRegisterBase: Int,
@@ -344,9 +344,9 @@ private fun resolveForYouTabHook(
                 val refreshBridges = mutableClass.methods.mapNotNull { method ->
                     method.tryResolveForYouCurrentPageRefreshBridge(currentPageRefreshEvent)
                 }.distinctBy { bridge -> bridge.toString() }
-                if (refreshBridges.size != 1) {
+                if (refreshBridges.size > 1) {
                     throw PatchException(
-                        "Expected one NewX modern For You refresh bridge for $originalMethod, " +
+                        "Expected at most one NewX modern For You refresh bridge for $originalMethod, " +
                             "found ${refreshBridges.size}: ${refreshBridges.joinToString()}",
                     )
                 }
@@ -363,7 +363,7 @@ private fun resolveForYouTabHook(
                     method = method,
                     insertionIndex = modernHookCandidate.insertionIndex +
                         mutableMethod.numberOfParameterRegistersLogical,
-                    refreshBridge = refreshBridges.single(),
+                    refreshBridge = refreshBridges.singleOrNull(),
                     forYouPageRegister = modernHookCandidate.pageRegister,
                     forYouSingletonField = forYouPageTarget.singletonField,
                     reservedRegisterBase = originalRegisterCount,
@@ -586,13 +586,20 @@ private fun installForYouRefreshBridge(
     )
     classDef.methods.add(bridgeMethod)
 
-    bridgeMethod.insertHook(0, relocateBranchTargets = false) {
-        emitForYouCurrentPageRefresh(
-            bridge = tabHook.refreshBridge,
-            receiverRegister = bridgeMethod.p0Register,
-            clearAndRefreshField = clearAndRefreshEvent.field,
-            scrollToTopField = scrollToTopEvent.field,
-        )
+    val activeBridge = tabHook.refreshBridge
+    if (activeBridge != null) {
+        bridgeMethod.insertHook(0, relocateBranchTargets = false) {
+            emitForYouCurrentPageRefresh(
+                bridge = activeBridge,
+                receiverRegister = bridgeMethod.p0Register,
+                clearAndRefreshField = clearAndRefreshEvent.field,
+                scrollToTopField = scrollToTopEvent.field,
+            )
+        }
+    } else {
+        bridgeMethod.insertHook(0, relocateBranchTargets = false) {
+            returnVoid()
+        }
     }
 }
 
@@ -630,31 +637,7 @@ private fun resolveSingletonTimelineEvent(
 private fun Method.tryResolveForYouCurrentPageRefreshBridge(
     clearAndRefreshEvent: ResolvedTimelineEvent,
 ): ResolvedForYouCurrentPageRefreshBridge? {
-    val instructions = implementation?.instructions?.toList() ?: return null
-
-    if (definingClass == "Lcom/x/home/tabbed/s;") {
-        val hasDispatch = instructions.any { inst ->
-            val m = inst.getReference<MethodReference>()
-            m != null &&
-                m.returnType == "V" &&
-                m.parameterTypes.size == 1 &&
-                m.parameterTypes.single().toString() in clearAndRefreshEvent.dispatchParameterTypes
-        }
-        val hasPagesList = instructions.any { inst ->
-            val f = inst.getReference<FieldReference>()
-            f != null && f.type == OBJECT_LIST_DESCRIPTOR
-        }
-        if (hasDispatch || hasPagesList) {
-            val refs = instructions.mapNotNull { inst ->
-                inst.getReference<MethodReference>()?.toString()
-                    ?: inst.getReference<FieldReference>()?.toString()
-                    ?: inst.getReference<TypeReference>()?.type
-            }.distinct().joinToString(" | ")
-            throw PatchException(
-                "[METHOD_MATCH] $definingClass->$name(hasDispatch=$hasDispatch, hasPagesList=$hasPagesList) => $refs"
-            )
-        }
-    }
+    implementation?.instructions ?: return null
     return null
 }
 /**
