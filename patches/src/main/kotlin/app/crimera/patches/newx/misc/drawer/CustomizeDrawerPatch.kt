@@ -862,23 +862,13 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
     showPikoSettingsInDrawer: ToggleSettingDefinition,
 ) {
     val iconParamIndex = renderer.parameterTypes.indexOfFirst { it.toString().startsWith("Lcom/x/icons/") }
-    if (iconParamIndex == 0) {
-        // 12.44+ dynamic footer loop: emit Piko Settings at most once per drawer build pass
-        val currentIconReg = target.call.startRegister
-        insertHook(
-            index = target.callIndex + 1,
-            excludedRegisters = (target.call.startRegister until target.call.startRegister + target.call.registerCount).toList(),
-            relocateBranchTargets = false,
-        ) {
-            val expectedIconReg = scratchRegister()
-            val shouldInjectReg = scratchRegister()
-            sget(expectedIconReg, settingsIconField)
-            ifNe(currentIconReg, expectedIconReg, Target.Original)
-            invokeStatic(methodReference("$COMPOSE_SETTINGS_HOOK_DESCRIPTOR->shouldInjectDrawerPikoSettings()Z"))
-            moveResult(shouldInjectReg, "Z")
-            ifEqz(shouldInjectReg, Target.Original)
+    val iconIndex = renderer.parameterTypes.indexOfFirst { it.toString().startsWith("Lcom/x/icons/") }
+    val matchIcon =
+        if (iconIndex >= 0) {
+            iconIndex to settingsIconField
+        } else {
+            null
         }
-    }
     injectAdditionalDrawerRow(
         target = target,
         renderer = renderer,
@@ -886,6 +876,7 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
         toggle = showPikoSettingsInDrawer,
         titleDescriptor = "$COMPOSE_SETTINGS_HOOK_DESCRIPTOR->getSettingsTitle()Ljava/lang/String;",
         clickDescriptor = "$COMPOSE_SETTINGS_HOOK_DESCRIPTOR->getSettingsClickHandler()$FUNCTION0_DESCRIPTOR",
+        matchIcon = matchIcon,
     )
 }
 
@@ -897,6 +888,7 @@ private fun MutableMethod.injectAdditionalDrawerRow(
     titleDescriptor: String,
     clickDescriptor: String,
     registerConstraint: SettingReadRegisterConstraint = SettingReadRegisterConstraint.FOUR_BIT,
+    matchIcon: Pair<Int, FieldReference>? = null,
 ) {
     injectSnapshotDrawerRow(
         callIndex = target.callIndex,
@@ -908,6 +900,7 @@ private fun MutableMethod.injectAdditionalDrawerRow(
         titleDescriptor = titleDescriptor,
         clickDescriptor = clickDescriptor,
         registerConstraint = registerConstraint,
+        matchIcon = matchIcon,
     )
 }
 
@@ -940,6 +933,7 @@ private fun MutableMethod.injectSnapshotDrawerRow(
     titleDescriptor: String,
     clickDescriptor: String,
     registerConstraint: SettingReadRegisterConstraint = SettingReadRegisterConstraint.FOUR_BIT,
+    matchIcon: Pair<Int, FieldReference>? = null,
 ) {
     val parameters = renderer.parameterTypes.map(CharSequence::toString)
     val titleIndices = parameters.indices.filter { parameters[it] == "Ljava/lang/String;" }
@@ -995,6 +989,17 @@ private fun MutableMethod.injectSnapshotDrawerRow(
         // anchor has to keep jumping to the original instruction instead of into the block.
         relocateBranchTargets = false,
     ) {
+        if (matchIcon != null) {
+            val (matchedIconIndex, expectedIconField) = matchIcon
+            val actualIconReg = startRegister + matchedIconIndex
+            val expectedIconReg = scratchRegister()
+            val shouldInjectReg = scratchRegister()
+            sget(expectedIconReg, expectedIconField)
+            ifNe(actualIconReg, expectedIconReg, Target.Original)
+            invokeStatic(methodReference("$COMPOSE_SETTINGS_HOOK_DESCRIPTOR->shouldInjectDrawerPikoSettings()Z"))
+            moveResult(shouldInjectReg, "Z")
+            ifEqz(shouldInjectReg, Target.Original)
+        }
         if (settingRead != null) {
             ifEqz(settingRead.register, Target.Original)
         }
