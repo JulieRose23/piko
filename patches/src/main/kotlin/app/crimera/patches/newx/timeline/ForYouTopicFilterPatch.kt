@@ -638,6 +638,9 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
     fun typeAt(index: Int): String? =
         instructions[index].getReference<TypeReference>()?.type
 
+    fun methodAt(index: Int): MethodReference? =
+        instructions[index].getReference<MethodReference>()
+
     val stateFields = instructions.withIndex()
         .filter { (_, instruction) -> instruction.opcode == Opcode.IGET_OBJECT }
         .mapNotNull { (index, _) -> fieldAt(index) }
@@ -652,8 +655,8 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
                 }
         }
         .distinctBy(FieldReference::toString)
-    if (stateFields.size != 1) return null
-    val stateField = stateFields[0]
+    if (stateFields.isEmpty()) return null
+    val stateField = stateFields.first()
 
     val stateGetters = instructions.withIndex()
         .filter { (_, instruction) -> instruction.opcode == Opcode.INVOKE_VIRTUAL }
@@ -666,22 +669,26 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
             }
         }
         .distinctBy(MethodReference::toString)
-    if (stateGetters.size != 1) return null
-    val stateGetter = stateGetters[0]
+    if (stateGetters.isEmpty()) return null
+    val stateGetter = stateGetters.first()
 
     val pagesCastCandidates = instructions.withIndex()
         .filter { (index, instruction) ->
-            instruction.opcode == Opcode.CHECK_CAST &&
-                index > 1 &&
-                instructions[index - 1].opcode == Opcode.MOVE_RESULT_OBJECT &&
-                instructions[index - 2].getReference<MethodReference>()?.matches(stateGetter) == true &&
-                instructions.getOrNull(index + 1)?.opcode == Opcode.IGET_OBJECT &&
-                instructions[index + 1].getReference<FieldReference>()?.let { field ->
-                    field.definingClass == typeAt(index) && field.type == OBJECT_LIST_DESCRIPTOR
-                } == true
+            if (instruction.opcode != Opcode.CHECK_CAST) return@filter false
+            val candidateType = typeAt(index) ?: return@filter false
+            val hasListField = instructions.any { inst ->
+                inst.opcode == Opcode.IGET_OBJECT &&
+                    inst.getReference<FieldReference>()?.let { field ->
+                        field.definingClass == candidateType && field.type == OBJECT_LIST_DESCRIPTOR
+                    } == true
+            }
+            val getterCalledBefore = (maxOf(0, index - 8) until index).any { prevIdx ->
+                methodAt(prevIdx)?.matches(stateGetter) == true
+            }
+            hasListField && getterCalledBefore
         }
-    if (pagesCastCandidates.size != 1) return null
-    val pagesCastIndex = pagesCastCandidates[0].index
+    if (pagesCastCandidates.isEmpty()) return null
+    val pagesCastIndex = pagesCastCandidates.first().index
     val pagesType = typeAt(pagesCastIndex) ?: return null
 
     val pagesListFields = instructions.withIndex()
@@ -705,8 +712,9 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
             instruction.getReference<FieldReference>()?.toString() == pagesListField.toString()
         }
         .mapNotNull { (_, instruction) -> instruction as? TwoRegisterInstruction }
-    if (pagesListRegisterCandidates.size != 1) return null
-    val pagesListRegister = pagesListRegisterCandidates[0]
+    if (pagesListRegisterCandidates.isEmpty()) return null
+    val listRegs = pagesListRegisterCandidates.map { it.registerA }.toSet()
+
     val pageLookupCandidates = instructions.withIndex()
         .filter { (_, instruction) -> instruction.opcode == Opcode.INVOKE_INTERFACE }
         .mapNotNull { (index, instruction) ->
@@ -715,61 +723,45 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
                 reference.name != "get" ||
                 reference.returnType != OBJECT_DESCRIPTOR ||
                 reference.parameterTypes.map(CharSequence::toString) != listOf(INTEGER_DESCRIPTOR) ||
-                instruction.registersUsed.size != 2 ||
-                instruction.registersUsed.getOrNull(0) != pagesListRegister.registerA
+                instruction.registersUsed.isEmpty() ||
+                instruction.registersUsed.first() !in listRegs
             ) {
                 return@mapNotNull null
             }
             index to reference
         }
-    if (pageLookupCandidates.size != 1) return null
-    val (pageLookupIndex, pageLookup) = pageLookupCandidates[0]
+    if (pageLookupCandidates.isEmpty()) return null
+    val (pageLookupIndex, pageLookup) = pageLookupCandidates.first()
 
-    val componentCastIndex = pageLookupIndex + 2
-    if (componentCastIndex >= instructions.size ||
-        instructions[pageLookupIndex + 1].opcode != Opcode.MOVE_RESULT_OBJECT ||
-        instructions[componentCastIndex].opcode != Opcode.CHECK_CAST
-    ) {
-        return null
-    }
-    val componentCast = instructions[componentCastIndex] as? OneRegisterInstruction
-        ?: return null
-    val componentType = typeAt(componentCastIndex) ?: return null
-    val componentGetterIndex = componentCastIndex + 1
-    if (componentGetterIndex >= instructions.size ||
-        instructions[componentGetterIndex].opcode != Opcode.INVOKE_VIRTUAL
-    ) {
-        return null
-    }
-    val componentGetter = instructions[componentGetterIndex]
-        .getReference<MethodReference>() ?: return null
-    if (componentGetter.definingClass != componentType ||
-        componentGetter.returnType != OBJECT_DESCRIPTOR ||
-        componentGetter.parameterTypes.isNotEmpty() ||
-        instructions[componentGetterIndex].registersUsed != listOf(componentCast.registerA)
-    ) {
-        return null
-    }
+    val componentCastEntry = (pageLookupIndex + 1 until minOf(instructions.size, pageLookupIndex + 8))
+        .firstNotNullOfOrNull { idx ->
+            if (instructions[idx].opcode != Opcode.CHECK_CAST) return@firstNotNullOfOrNull null
+            val castInst = instructions[idx] as? OneRegisterInstruction ?: return@firstNotNullOfOrNull null
+            val castType = typeAt(idx) ?: return@firstNotNullOfOrNull null
+            val getterIdx = (idx + 1 until minOf(instructions.size, idx + 6)).firstOrNull { gIdx ->
+                if (instructions[gIdx].opcode != Opcode.INVOKE_VIRTUAL) return@firstOrNull false
+                val ref = methodAt(gIdx) ?: return@firstOrNull false
+                ref.definingClass == castType &&
+                    ref.returnType == OBJECT_DESCRIPTOR &&
+                    ref.parameterTypes.isEmpty()
+            } ?: return@firstNotNullOfOrNull null
+            Triple(idx, castType, methodAt(getterIdx)!!)
+        } ?: return null
+    val (componentCastIndex, componentType, componentGetter) = componentCastEntry
 
-    val getterResultIndex = componentGetterIndex + 1
-    val forYouInstanceOfIndex = getterResultIndex + 1
-    if (forYouInstanceOfIndex >= instructions.size ||
-        instructions[getterResultIndex].opcode != Opcode.MOVE_RESULT_OBJECT ||
-        instructions[forYouInstanceOfIndex].opcode != Opcode.INSTANCE_OF
-    ) {
-        return null
-    }
-    val forYouInstanceOf = instructions[forYouInstanceOfIndex] as? TwoRegisterInstruction
+    val forYouInstanceOfIndex = (componentCastIndex + 1 until minOf(instructions.size, componentCastIndex + 10))
+        .firstOrNull { idx -> instructions[idx].opcode == Opcode.INSTANCE_OF }
         ?: return null
     val forYouComponentType = typeAt(forYouInstanceOfIndex) ?: return null
+
     val forYouControllerFields = instructions.withIndex()
         .drop(forYouInstanceOfIndex + 1)
         .filter { (_, instruction) -> instruction.opcode == Opcode.IGET_OBJECT }
         .mapNotNull { (index, _) -> fieldAt(index) }
         .filter { field -> field.definingClass == forYouComponentType }
         .distinctBy(FieldReference::toString)
-    if (forYouControllerFields.size != 1) return null
-    val forYouControllerField = forYouControllerFields[0]
+    if (forYouControllerFields.isEmpty()) return null
+    val forYouControllerField = forYouControllerFields.first()
 
     val refreshDispatches = instructions.withIndex()
         .drop(forYouInstanceOfIndex + 1)
@@ -785,7 +777,7 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
             }
         }
         .distinctBy(MethodReference::toString)
-    if (refreshDispatches.size != 1) return null
+    if (refreshDispatches.isEmpty()) return null
 
     return ResolvedForYouCurrentPageRefreshBridge(
         stateField = stateField,
@@ -798,10 +790,9 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
         componentGetter = componentGetter,
         forYouComponentType = forYouComponentType,
         forYouControllerField = forYouControllerField,
-        refreshDispatch = refreshDispatches.single(),
+        refreshDispatch = refreshDispatches.first(),
     )
 }
-
 /**
  * Re-dispatches a refresh of the For You page that is currently shown.
  *
