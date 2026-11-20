@@ -1181,6 +1181,8 @@ private fun resolveDrawerTabNavigation(
         if (index >= closerIndex) return@mapNotNull null
         val instruction = dispatcherInstructions[index]
         if (instruction.opcode != Opcode.SGET_OBJECT) return@mapNotNull null
+        val destination = (instruction as? OneRegisterInstruction)?.registerA ?: return@mapNotNull null
+        if (destination != closerArgRegister) return@mapNotNull null
         instruction.getReference<FieldReference>()
     }
     val inlineArgField = dispatcherInstructions.resolveIconField(closerIndex, closerArgRegister)
