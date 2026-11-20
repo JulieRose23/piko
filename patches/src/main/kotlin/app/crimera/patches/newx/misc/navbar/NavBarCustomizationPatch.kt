@@ -255,22 +255,23 @@ private fun NavBarItemContentTarget.injectReplacementOverride(tabDataConstructor
         val instanceRegister = scratchRegister()
         val workRegister = scratchRegister()
 
-        // The receiver is preserved in a local above the original frame, so it is moved into the
-        // four-bit work register before every field read (format 22c cannot encode the receiver).
+        // The receiver (or direct navigation enum in 12.44+) is preserved in a local above the
+        // original frame, so it is moved into the four-bit work register before every read.
+        val navField = navigationField
         move(workRegister, thisRegister, OBJECT_DESCRIPTOR)
-        iget(workRegister, workRegister, navigationField)
+        if (navField != null) iget(workRegister, workRegister, navField)
         invokeStatic(methodReference(OVERRIDE_ICON_DESCRIPTOR), workRegister, iconRegister)
         moveResult(workRegister, iconType)
         checkCast(workRegister, iconType)
         move(iconRegister, workRegister, OBJECT_DESCRIPTOR)
 
         move(workRegister, thisRegister, OBJECT_DESCRIPTOR)
-        iget(workRegister, workRegister, navigationField)
+        if (navField != null) iget(workRegister, workRegister, navField)
         invokeStatic(methodReference(OVERRIDE_LABEL_DESCRIPTOR), workRegister, labelRegister)
         moveResult(labelRegister, STRING_DESCRIPTOR)
 
         move(workRegister, thisRegister, OBJECT_DESCRIPTOR)
-        iget(workRegister, workRegister, navigationField)
+        if (navField != null) iget(workRegister, workRegister, navField)
         invokeStatic(methodReference(SHOULD_CLEAR_BADGE_DESCRIPTOR), workRegister)
         moveResult(workRegister, "Z")
         ifEqz(workRegister, Target.Original)

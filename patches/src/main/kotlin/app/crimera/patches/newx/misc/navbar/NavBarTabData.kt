@@ -54,7 +54,7 @@ internal val NAV_BAR_NATIVE_TAB_OPTIONS =
 
 internal data class NavBarItemContentTarget(
     val method: MutableMethod,
-    val navigationField: FieldReference,
+    val navigationField: FieldReference?,
     val iconType: String,
     val tabDataValueType: String,
     val rendererCallIndex: Int,
@@ -434,6 +434,58 @@ internal fun resolveNavBarItemContent(tabData: NewXNavBarTabData): NavBarItemCon
                     }
             } == true
         }
+    if (consumerClasses.isEmpty()) {
+        // 12.44+ inlined the item content lambda into a static Compose helper taking navigationType as p0.
+        val staticMatches =
+            rendererCalls.filter { match ->
+                val method = match.originalMethod
+                (method.accessFlags and com.android.tools.smali.dexlib2.AccessFlags.STATIC.value) != 0 &&
+                    method.parameterTypes.firstOrNull()?.toString() == tabData.navigationType
+            }
+        if (staticMatches.size == 1) {
+            val staticMatch = staticMatches.single()
+            val consumerClassDef = mutableClassDefBy(staticMatch.originalClassDef.type)
+            val originalMethod =
+                consumerClassDef.methods.first { method ->
+                    method.name == staticMatch.originalMethod.name &&
+                        method.returnType == staticMatch.originalMethod.returnType &&
+                        method.parameterTypes.map(CharSequence::toString) ==
+                        staticMatch.originalMethod.parameterTypes.map(CharSequence::toString)
+                }
+            val originalRegisterCount =
+                originalMethod.implementation?.registerCount
+                    ?: throw PatchException("NewX navigation bar item content has no implementation: $originalMethod")
+            val consumerMethod =
+                originalMethod.cloneMutable(
+                    additionalRegisters = originalMethod.numberOfParameterRegisters + 1,
+                )
+            consumerClassDef.methods.remove(originalMethod)
+            consumerClassDef.methods.add(consumerMethod)
+
+            val rendererCallIndices =
+                consumerMethod.instructions.mapIndexedNotNull { index, instruction ->
+                    index.takeIf { instruction.referencesMethod(rendererDescriptor) }
+                }
+            val rendererCallIndex =
+                requireExactlyOne("NewX navigation bar item renderer call", rendererCallIndices) { it.toString() }
+            val rendererCall =
+                consumerMethod.instructions.getOrNull(rendererCallIndex) as? Instruction35c
+                    ?: throw PatchException("NewX navigation bar item renderer call is not a 5-register invoke")
+            return NavBarItemContentTarget(
+                method = consumerMethod,
+                navigationField = null,
+                iconType = renderer.parameterTypes.first().toString(),
+                tabDataValueType = tabData.tabDataValueType,
+                rendererCallIndex = rendererCallIndex,
+                iconRegister = rendererCall.registerC,
+                labelRegister = rendererCall.registerD,
+                tabDataValueRegister = rendererCall.registerE,
+                thisRegister = originalRegisterCount,
+                tabIconFields = resolveTabIconFieldsFromHelper(tabData.navigationType),
+            )
+        }
+    }
+
     // This is a read-only discovery pass. Converting every class to a mutable proxy here keeps
     // the whole APK alive and can exceed the manager's 512 MB minimum heap on large NewX builds.
     val consumerClass =
