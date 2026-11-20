@@ -797,8 +797,8 @@ private fun MutableMethod.factoryResultFeedsStore(
                         // object is stored immediately, so no move-result exists.
                         reference.name == "<init>" &&
                             reference.returnType == "V" &&
-                            reference.parameterTypes.map(CharSequence::toString) ==
-                                listOf(FUNCTION0_DESCRIPTOR) &&
+                            reference.parameterTypes.firstOrNull()?.toString() ==
+                                FUNCTION0_DESCRIPTOR &&
                             registers.getOrNull(functionParameter + 1) == allocationRegister &&
                             registers.firstOrNull() == storeRegister &&
                             indexed.index + 1 == storeIndex
