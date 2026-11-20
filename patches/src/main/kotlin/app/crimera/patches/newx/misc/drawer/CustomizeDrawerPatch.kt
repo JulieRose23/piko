@@ -861,7 +861,6 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
     settingsIconField: FieldReference,
     showPikoSettingsInDrawer: ToggleSettingDefinition,
 ) {
-    val iconParamIndex = renderer.parameterTypes.indexOfFirst { it.toString().startsWith("Lcom/x/icons/") }
     val iconIndex = renderer.parameterTypes.indexOfFirst { it.toString().startsWith("Lcom/x/icons/") }
     val matchIcon =
         if (iconIndex >= 0) {
@@ -997,9 +996,6 @@ private fun MutableMethod.injectSnapshotDrawerRow(
             val shouldInjectReg = scratchRegister()
             sget(expectedIconReg, expectedIconField)
             ifNe(actualIconReg, expectedIconReg, Target.Original)
-            invokeStatic(methodReference("$COMPOSE_SETTINGS_HOOK_DESCRIPTOR->shouldInjectDrawerPikoSettings()Z"))
-            moveResult(shouldInjectReg, "Z")
-            ifEqz(shouldInjectReg, Target.Original)
         }
         if (settingRead != null) {
             ifEqz(settingRead.register, Target.Original)
