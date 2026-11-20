@@ -33,17 +33,26 @@ private val SPACES_BAR_PREFIX =
         MODIFIER_DESCRIPTOR,
         "Z",
     )
-private val SPACES_BAR_TAIL =
+private val SPACES_BAR_TAILS =
     listOf(
-        FUNCTION_ZERO_DESCRIPTOR,
-        COMPOSER_DESCRIPTOR,
-        "I",
-        "I",
+        listOf(
+            FUNCTION_ZERO_DESCRIPTOR,
+            COMPOSER_DESCRIPTOR,
+            "I",
+            "I",
+        ),
+        listOf(
+            FUNCTION_ZERO_DESCRIPTOR,
+            FUNCTION_ZERO_DESCRIPTOR,
+            COMPOSER_DESCRIPTOR,
+            "I",
+            "I",
+        ),
     )
 private val SPACES_BAR_CALLBACK_DESCRIPTORS =
     setOf(FUNCTION_ONE_DESCRIPTOR, FUNCTION_TWO_DESCRIPTOR)
 
-// Callback band between the prefix and the trailing (Function0, Composer, Int, Int) group.
+// Callback band between the prefix and the trailing (Function0+, Composer, Int, Int) group.
 // Releases add callbacks and widen them to Function2; cardinality is asserted on the renderer.
 private const val MINIMUM_SPACES_BAR_CALLBACK_COUNT = 2
 
@@ -52,11 +61,15 @@ private fun Method.hasKnownSpacesBarSignature(): Boolean {
     if (!parameters.firstOrNull().orEmpty().isObjectDescriptor()) return false
 
     val callbackStart = 1 + SPACES_BAR_PREFIX.size
-    val callbackEnd = parameters.size - SPACES_BAR_TAIL.size
-    if (callbackEnd - callbackStart < MINIMUM_SPACES_BAR_CALLBACK_COUNT) return false
+    if (parameters.size <= callbackStart) return false
     if (parameters.subList(1, callbackStart) != SPACES_BAR_PREFIX) return false
-    if (parameters.subList(callbackStart, callbackEnd).any { it !in SPACES_BAR_CALLBACK_DESCRIPTORS }) return false
-    return parameters.subList(callbackEnd, parameters.size) == SPACES_BAR_TAIL
+
+    return SPACES_BAR_TAILS.any { tail ->
+        val callbackEnd = parameters.size - tail.size
+        callbackEnd - callbackStart >= MINIMUM_SPACES_BAR_CALLBACK_COUNT &&
+            parameters.subList(callbackStart, callbackEnd).all { it in SPACES_BAR_CALLBACK_DESCRIPTORS } &&
+            parameters.subList(callbackEnd, parameters.size) == tail
+    }
 }
 
 private fun String.isObjectDescriptor(): Boolean = startsWith('L') && endsWith(';')
