@@ -447,17 +447,24 @@ private fun List<Instruction>.resolveDrawerTitleResourceIds(
                 resolveIntegerLiterals(lookupIndex, registers[resRegIdx])
                     .filterTo(resourceIds) { it != 0 && (it ushr 16) == 0x7f13 }
             }
-        } else if (lookupReference.definingClass.startsWith(DRAWER_SCOPE) &&
-            lookupReference.returnType == "Ljava/lang/String;" &&
-            lookupReference.parameterTypes.any { it.toString() == COMPOSER_DESCRIPTOR }
-        ) {
-            val helperMatch = Fingerprint(
-                definingClass = lookupReference.definingClass,
-                name = lookupReference.name,
-                returnType = lookupReference.returnType,
-                parameters = lookupReference.parameterTypes.map(CharSequence::toString),
-            ).matchOrNull()
-            helperMatch?.method?.instructions?.extractAllStringResourceIds()?.let { resourceIds += it }
+        }
+    }
+
+    // 12.44+: drawer row titles are resolved upstream in a DRAWER_SCOPE helper
+    // taking (Lcom/x/main/api/landing/...;, Z, Composer) -> Ljava/lang/String; (e.g. x;->v)
+    if (resourceIds.isEmpty()) {
+        Fingerprint(
+            definingClass = DRAWER_SCOPE,
+            returnType = "Ljava/lang/String;",
+            custom = { method, _ ->
+                val params = method.parameterTypes.map(CharSequence::toString)
+                params.size == 3 &&
+                    params[0].startsWith("Lcom/x/main/api/landing/") &&
+                    params[1] == "Z" &&
+                    params[2] == COMPOSER_DESCRIPTOR
+            },
+        ).matchAllOrNull().orEmpty().forEach { helperMatch ->
+            resourceIds += helperMatch.method.instructions.extractAllStringResourceIds()
         }
     }
 
