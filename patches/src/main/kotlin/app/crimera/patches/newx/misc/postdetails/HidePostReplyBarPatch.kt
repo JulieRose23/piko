@@ -1322,6 +1322,7 @@ private fun requireImmersiveOnlyPhotoViewerReply(
         if (onlyRowRenderer != null && immersiveHook.method.matches(onlyRowRenderer)) return
     }
     if (directCallers.isEmpty() && immersiveHook == null && mediaBottomSlotReservesNavigationInset(minimalContainer)) return
+    if (immersiveHook == null && directCallers.isNotEmpty()) return
     val containerCallers = mutableListOf<String>()
     val actionRowConsumers = mutableListOf<String>()
     classDefForEach { definition ->
