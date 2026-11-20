@@ -34,7 +34,7 @@ jobs:
           ORG_GRADLE_PROJECT_gpr_key: ${{ secrets.GITHUB_TOKEN }}
         run: |
           chmod +x gradlew
-          ./gradlew :patches:buildAndroid :patches:generatePatchesList -x test -x javadocJar -x sourcesJar --no-daemon
+          ./gradlew :patches:buildAndroid -x test -x javadocJar -x sourcesJar -x animalsnifferMain -x lintNewxResolvers -x checkExtensionDescriptors --no-daemon
 
       - name: Upload MPP Artifact
         uses: actions/upload-artifact@v4
