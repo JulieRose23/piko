@@ -98,19 +98,9 @@ private object NewXMainActivityOnNewIntentFingerprint : Fingerprint(
 )
 
 private object NewXHomeReselectFingerprint : Fingerprint(
-    definingClass = "Lcom/x/home/tabbed/",
-    parameters = listOf("Z", "Z"),
-    returnType = "Z",
     filters =
         listOf(
             string("timeline_auto_refresh_on_foreground_timeout_millis"),
-            methodCall(
-                opcode = Opcode.INVOKE_INTERFACE,
-                name = "getInt",
-                parameters = listOf("Ljava/lang/String;", "I"),
-                returnType = "I",
-            ),
-            opcode(Opcode.MOVE_RESULT, MatchAfterImmediately()),
         ),
 )
 
