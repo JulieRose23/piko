@@ -98,7 +98,8 @@ private object MediaSheetBuilderFingerprint : Fingerprint(
 private data class ResolvedMediaSheetLabel(
     val rowDescriptor: String,
     val labelDescriptor: String,
-    val labelGetter: MethodReference,
+    val labelGetter: MethodReference?,
+    val labelField: FieldReference?,
     val labelResourceField: FieldReference,
 )
 
@@ -213,7 +214,17 @@ private fun resolveMediaSheetLabelModel(match: Match): ResolvedMediaSheetLabel {
         rowClass.methods.filter { candidate ->
             candidate.parameterTypes.isEmpty() && candidate.returnType == labelBase
         }
-    val labelGetter = requireExactlyOne("NewX media-sheet label getter in ${rowClass.type}", labelGetters)
+    val labelGetter = labelGetters.singleOrNull()
+    val labelField =
+        if (labelGetter == null) {
+            rowClass.fields.firstOrNull { field ->
+                !AccessFlags.STATIC.isSet(field.accessFlags) && field.type == labelBase
+            } ?: throw PatchException(
+                "Expected a NewX media-sheet label getter or field of type $labelBase in ${rowClass.type}",
+            )
+        } else {
+            null
+        }
 
     val labelResourceFields =
         labelClass.fields.filter { field ->
@@ -226,6 +237,7 @@ private fun resolveMediaSheetLabelModel(match: Match): ResolvedMediaSheetLabel {
         rowDescriptor = rowClass.type,
         labelDescriptor = labelClass.type,
         labelGetter = labelGetter,
+        labelField = labelField,
         labelResourceField = labelResourceField,
     )
 }
@@ -312,8 +324,15 @@ private fun patchMediaSheetLabelBridge(model: ResolvedMediaSheetLabel) {
 
     bridge.insertHook(0, relocateBranchTargets = false) {
         checkCast(register, model.rowDescriptor)
-        invokeVirtual(model.labelGetter, register)
-        moveResult(register, model.labelGetter.returnType)
+        val getter = model.labelGetter
+        if (getter != null) {
+            invokeVirtual(getter, register)
+            moveResult(register, getter.returnType)
+        } else {
+            val field = model.labelField
+                ?: throw PatchException("Missing both labelGetter and labelField for ${model.rowDescriptor}")
+            iget(register, register, field)
+        }
         checkCast(register, model.labelDescriptor)
         iget(register, register, model.labelResourceField)
         returnValue(register)
