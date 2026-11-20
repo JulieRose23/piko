@@ -239,7 +239,8 @@ val disableTimelineRefreshPatch =
                     !m.contains("<init>") &&
                         !m.contains("/notifications/") &&
                         !m.contains("/dms/") &&
-                        !m.contains("/di/")
+                        !m.contains("/di/") &&
+                        m.contains("->t(")
                 }
             if (homeMatches.size != 1) {
                 throw PatchException(
