@@ -865,10 +865,10 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
     val iconParamIndex = renderer.parameterTypes.indexOfFirst { it.toString().startsWith("Lcom/x/icons/") }
     if (iconParamIndex == 0) {
         // 12.44+ dynamic footer loop: inject only once right after the Settings item (icon == settingsIconField)
-        val guardFieldRef = ImmutableFieldReference(
-            definingClass,
-            "pikoDrawerSettingsEmitted",
-            "Z",
+        val guardFieldRef = fieldReference(
+            definingClass = definingClass,
+            name = "pikoDrawerSettingsEmitted",
+            type = "Z",
         )
         val hostClass = mutableClassDefBy(definingClass)
         if (hostClass.fields.none { it.name == "pikoDrawerSettingsEmitted" }) {
@@ -879,9 +879,9 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
                     "Z",
                     AccessFlags.PRIVATE.value or AccessFlags.STATIC.value,
                     null,
-                    null,
                     emptySet(),
-                ),
+                    emptySet(),
+                ).toMutable(),
             )
         }
         val currentIconReg = target.call.startRegister
