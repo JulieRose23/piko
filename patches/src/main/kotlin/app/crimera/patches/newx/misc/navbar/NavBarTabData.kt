@@ -659,3 +659,50 @@ internal fun Instruction.referencesMethod(descriptor: String): Boolean =
 
 internal fun MethodReference.toSmaliDescriptor(): String =
     "${definingClass}->${name}(${parameterTypes.joinToString("")})${returnType}"
+
+internal fun BytecodePatchContext.resolveTabIconFieldsFromHelper(
+    navigationType: String,
+): Map<String, FieldReference> {
+    val iconHelperCandidates = buildList {
+        classDefForEach { classDef ->
+            classDef.methods.forEach { method ->
+                if (method.implementation != null &&
+                    method.returnType.startsWith("Lcom/x/icons/") &&
+                    method.parameterTypes.map(CharSequence::toString) == listOf(navigationType) &&
+                    method.instructions.any { it.opcode == Opcode.PACKED_SWITCH }
+                ) {
+                    add(mutableClassDefBy(classDef.type).methods.first {
+                        it.name == method.name &&
+                            it.parameterTypes == method.parameterTypes &&
+                            it.returnType == method.returnType
+                    })
+                }
+            }
+        }
+    }
+    return iconHelperCandidates
+        .mapNotNull { helper ->
+            runCatching {
+                val mappingFields = helper.instructions
+                    .filter { it.opcode == Opcode.SGET_OBJECT && it.getReference<FieldReference>()?.type == "[I" }
+                    .mapNotNull { it.getReference<FieldReference>() }
+                    .distinctBy(FieldReference::toString)
+                val mappingField = mappingFields.single()
+                val enumCases = resolveEnumSwitchCases(navigationType, mappingField)
+                val switchIndex = helper.instructions.indexOfFirst { it.opcode == Opcode.PACKED_SWITCH }
+                val cases = helper.packedSwitchCases(switchIndex)
+                NAV_BAR_NATIVE_TAB_OPTIONS.associate { (name, _) ->
+                    val caseKey = enumCases.getValue(name)
+                    val switchCase = cases.single { it.key == caseKey }
+                    val iconField = (switchCase.startIndex..switchCase.endIndex)
+                        .asSequence()
+                        .map { helper.instructions[it] }
+                        .first { it.opcode == Opcode.SGET_OBJECT }
+                        .getReference<FieldReference>()!!
+                    name to iconField
+                }
+            }.getOrNull()
+        }
+        .firstOrNull { map -> "DM" in map && "GROK" in map && "NOTIFICATIONS" in map }
+        ?: throw PatchException("NewX tab icon helper ($navigationType -> Lcom/x/icons/b;) not found")
+}

@@ -19,7 +19,7 @@ import app.crimera.patches.newx.misc.navbar.NewXNavBarTabData
 import app.crimera.patches.newx.misc.navbar.NewXTabDataFingerprint
 import app.crimera.patches.newx.misc.navbar.resolveIconField
 import app.crimera.patches.newx.misc.navbar.resolveNavBarItemContent
-import app.crimera.patches.newx.misc.navbar.resolveNavigationTabIcons
+import app.crimera.patches.newx.misc.navbar.resolveTabIconFieldsFromHelper
 import app.crimera.patches.newx.misc.navbar.resolveTitleResourceIdAtRowCall
 import app.morphe.patcher.patch.classDefBy
 import app.morphe.patcher.patch.classDefForEach
@@ -1545,30 +1545,3 @@ val customizeNewXDrawerPatch =
         }
     }
 
-private fun app.morphe.patcher.patch.BytecodePatchContext.resolveTabIconFieldsFromHelper(
-    navigationType: String,
-): Map<String, FieldReference> {
-    val iconHelperCandidates = buildList {
-        classDefForEach { classDef ->
-            classDef.methods.forEach { method ->
-                if (method.implementation != null &&
-                    method.returnType.startsWith("Lcom/x/icons/") &&
-                    method.parameterTypes.map(CharSequence::toString) == listOf(navigationType) &&
-                    method.instructions.any { it.opcode == Opcode.PACKED_SWITCH }
-                ) {
-                    add(mutableClassDefBy(classDef.type).methods.first {
-                        it.name == method.name &&
-                            it.parameterTypes == method.parameterTypes &&
-                            it.returnType == method.returnType
-                    })
-                }
-            }
-        }
-    }
-    return iconHelperCandidates
-        .mapNotNull { helper ->
-            runCatching { helper.resolveNavigationTabIcons(navigationType, iconRegister = 0) }.getOrNull()
-        }
-        .firstOrNull { map -> "DM" in map && "GROK" in map && "NOTIFICATIONS" in map }
-        ?: throw PatchException("NewX tab icon helper ($navigationType -> Lcom/x/icons/b;) not found")
-}
