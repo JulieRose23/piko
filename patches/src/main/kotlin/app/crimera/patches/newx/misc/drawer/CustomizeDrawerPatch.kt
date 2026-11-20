@@ -854,12 +854,12 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
     target: DrawerFooterTarget,
     renderer: MethodReference,
     settingsIconType: String,
+    settingsIconField: FieldReference,
     showPikoSettingsInDrawer: ToggleSettingDefinition,
 ) {
     val iconParamIndex = renderer.parameterTypes.indexOfFirst { it.toString().startsWith("Lcom/x/icons/") }
     if (iconParamIndex == 0) {
         // 12.44+ dynamic footer loop: only inject once right after the Settings item (icon == settingsIconField)
-        val settingsIconField = resolveSettingsIconField(settingsIconType)
         val currentIconReg = target.call.startRegister
         insertHook(
             index = target.callIndex + 1,
@@ -867,7 +867,7 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
             relocateBranchTargets = false,
         ) {
             val expectedIconReg = scratchRegister()
-            sgetObject(expectedIconReg, settingsIconField)
+            sget(expectedIconReg, settingsIconField)
             ifNe(currentIconReg, expectedIconReg, Target.Original)
         }
     }
@@ -1490,6 +1490,7 @@ val customizeNewXDrawerPatch =
                 target = footerTarget,
                 renderer = footerTarget.renderer,
                 settingsIconType = settingsIconType,
+                settingsIconField = settingsIconField,
                 showPikoSettingsInDrawer = showPikoSettingsInDrawer,
             )
             // Null toggle: the title provider returns null while disabled, so no setting
