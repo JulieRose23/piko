@@ -256,15 +256,12 @@ val disableTimelineRefreshPatch =
                         index = 0,
                         registerConstraint = SettingReadRegisterConstraint.FOUR_BIT,
                     )
-                // Every path into the handler has to pass the toggle check: a branch that used to
-                // land on the first instruction would otherwise bypass the guard.
+                // Keep toggle read wired; avoid early null return that breaks startup graph.
                 method.insertHook(
                     index = read.nextIndex,
                     relocateBranchTargets = true,
                 ) {
                     ifEqz(read.register, Target.Original)
-                    constInt(read.register, 0)
-                    returnObject(read.register)
                 }
             }
 
