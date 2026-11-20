@@ -44,7 +44,6 @@ import app.crimera.bytecode.Block
 import app.crimera.bytecode.Target
 import app.crimera.bytecode.fieldReference
 import com.android.tools.smali.dexlib2.AccessFlags
-import com.android.tools.smali.dexlib2.iface.reference.FieldReference
 import com.android.tools.smali.dexlib2.immutable.ImmutableField
 import com.android.tools.smali.dexlib2.immutable.reference.ImmutableFieldReference
 import app.crimera.bytecode.insertHook
@@ -79,7 +78,6 @@ import com.android.tools.smali.dexlib2.iface.instruction.NarrowLiteralInstructio
 import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.TwoRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction3rc
-import com.android.tools.smali.dexlib2.iface.reference.FieldReference
 import com.android.tools.smali.dexlib2.iface.reference.MethodReference
 import com.android.tools.smali.dexlib2.immutable.reference.ImmutableMethodReference
 import app.morphe.patcher.patch.patch
@@ -892,7 +890,7 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
             ifNe(currentIconReg, expectedIconReg, Target.Original)
             sget(alreadyEmittedReg, guardFieldRef)
             ifNez(alreadyEmittedReg, Target.Original)
-            const(alreadyEmittedReg, 1)
+            addInstructions(0, """const/4 v0, 0x1""")
             sput(alreadyEmittedReg, guardFieldRef)
         }
     }
