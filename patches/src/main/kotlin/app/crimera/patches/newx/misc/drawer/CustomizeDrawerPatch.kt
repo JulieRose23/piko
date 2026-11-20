@@ -993,7 +993,6 @@ private fun MutableMethod.injectSnapshotDrawerRow(
             val (matchedIconIndex, expectedIconField) = matchIcon
             val actualIconReg = startRegister + matchedIconIndex
             val expectedIconReg = scratchRegister()
-            val shouldInjectReg = scratchRegister()
             sget(expectedIconReg, expectedIconField)
             ifNe(actualIconReg, expectedIconReg, Target.Original)
         }

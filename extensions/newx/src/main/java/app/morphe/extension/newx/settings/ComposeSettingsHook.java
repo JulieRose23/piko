@@ -28,11 +28,6 @@ public final class ComposeSettingsHook {
     }
 
     private static boolean drawerPikoSettingsEmitted = false;
-
-    public static boolean shouldInjectDrawerPikoSettings() {
-        if (drawerPikoSettingsEmitted) {
-            return false;
-        }
         drawerPikoSettingsEmitted = true;
         return true;
     }
