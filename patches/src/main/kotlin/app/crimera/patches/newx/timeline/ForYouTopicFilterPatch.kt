@@ -632,6 +632,13 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
 ): ResolvedForYouCurrentPageRefreshBridge? {
     val instructions = implementation?.instructions?.toList() ?: return null
 
+    fun diag(step: String, detail: String = ""): Nothing? {
+        if ("$definingClass->$name" == "Lcom/x/home/tabbed/s;->g") {
+            throw PatchException("[DIAG ForYouBridge] step=$step $detail")
+        }
+        return null
+    }
+
     fun fieldAt(index: Int): FieldReference? =
         instructions[index].getReference<FieldReference>()
 
@@ -655,7 +662,7 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
                 }
         }
         .distinctBy(FieldReference::toString)
-    if (stateFields.isEmpty()) return null
+    if (stateFields.isEmpty()) return diag("stateFields_empty", "igets=${instructions.count { it.opcode == Opcode.IGET_OBJECT }}")
     val stateField = stateFields.first()
 
     val stateGetters = instructions.withIndex()
@@ -669,7 +676,7 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
             }
         }
         .distinctBy(MethodReference::toString)
-    if (stateGetters.isEmpty()) return null
+    if (stateGetters.isEmpty()) return diag("stateGetters_empty", "stateField=$stateField")
     val stateGetter = stateGetters.first()
 
     val pagesCastCandidates = instructions.withIndex()
@@ -687,7 +694,7 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
             }
             hasListField && getterCalledBefore
         }
-    if (pagesCastCandidates.isEmpty()) return null
+    if (pagesCastCandidates.isEmpty()) return diag("pagesCast_empty", "stateGetter=$stateGetter")
     val pagesCastIndex = pagesCastCandidates.first().index
     val pagesType = typeAt(pagesCastIndex) ?: return null
 
@@ -696,7 +703,7 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
         .mapNotNull { (index, _) -> fieldAt(index) }
         .filter { field -> field.definingClass == pagesType && field.type == OBJECT_LIST_DESCRIPTOR }
         .distinctBy(FieldReference::toString)
-    if (pagesListFields.size != 1) return null
+    if (pagesListFields.size != 1) return diag("pagesListFields", "pagesType=$pagesType count=${pagesListFields.size}")
     val pagesListField = pagesListFields[0]
 
     val pagesIndexFields = instructions.withIndex()
@@ -704,7 +711,7 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
         .mapNotNull { (index, _) -> fieldAt(index) }
         .filter { field -> field.definingClass == pagesType && field.type == INTEGER_DESCRIPTOR }
         .distinctBy(FieldReference::toString)
-    if (pagesIndexFields.size != 1) return null
+    if (pagesIndexFields.size != 1) return diag("pagesIndexFields", "pagesType=$pagesType count=${pagesIndexFields.size}")
     val pagesIndexField = pagesIndexFields[0]
 
     val pagesListRegisterCandidates = instructions.withIndex()
@@ -712,7 +719,7 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
             instruction.getReference<FieldReference>()?.toString() == pagesListField.toString()
         }
         .mapNotNull { (_, instruction) -> instruction as? TwoRegisterInstruction }
-    if (pagesListRegisterCandidates.isEmpty()) return null
+    if (pagesListRegisterCandidates.isEmpty()) return diag("pagesListRegs", "field=$pagesListField")
     val listRegs = pagesListRegisterCandidates.map { it.registerA }.toSet()
 
     val pageLookupCandidates = instructions.withIndex()
@@ -730,7 +737,7 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
             }
             index to reference
         }
-    if (pageLookupCandidates.isEmpty()) return null
+    if (pageLookupCandidates.isEmpty()) return diag("pageLookup", "listRegs=$listRegs")
     val (pageLookupIndex, pageLookup) = pageLookupCandidates.first()
 
     val componentCastEntry = (pageLookupIndex + 1 until minOf(instructions.size, pageLookupIndex + 8))
@@ -746,13 +753,13 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
                     ref.parameterTypes.isEmpty()
             } ?: return@firstNotNullOfOrNull null
             Triple(idx, castType, methodAt(getterIdx)!!)
-        } ?: return null
+        } ?: return diag("componentCast", "pageLookupIdx=$pageLookupIndex")
     val (componentCastIndex, componentType, componentGetter) = componentCastEntry
 
     val forYouInstanceOfIndex = (componentCastIndex + 1 until minOf(instructions.size, componentCastIndex + 10))
         .firstOrNull { idx -> instructions[idx].opcode == Opcode.INSTANCE_OF }
-        ?: return null
-    val forYouComponentType = typeAt(forYouInstanceOfIndex) ?: return null
+        ?: return diag("instanceOf", "compCastIdx=$componentCastIndex compType=$componentType")
+    val forYouComponentType = typeAt(forYouInstanceOfIndex) ?: return diag("forYouCompType", "idx=$forYouInstanceOfIndex")
 
     val forYouControllerFields = instructions.withIndex()
         .drop(forYouInstanceOfIndex + 1)
@@ -760,7 +767,7 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
         .mapNotNull { (index, _) -> fieldAt(index) }
         .filter { field -> field.definingClass == forYouComponentType }
         .distinctBy(FieldReference::toString)
-    if (forYouControllerFields.isEmpty()) return null
+    if (forYouControllerFields.isEmpty()) return diag("ctrlFields", "forYouCompType=$forYouComponentType")
     val forYouControllerField = forYouControllerFields.first()
 
     val refreshDispatches = instructions.withIndex()
@@ -777,7 +784,7 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
             }
         }
         .distinctBy(MethodReference::toString)
-    if (refreshDispatches.isEmpty()) return null
+    if (refreshDispatches.isEmpty()) return diag("refreshDispatches", "ctrlField=$forYouControllerField dispatches=${clearAndRefreshEvent.dispatchParameterTypes}")
 
     return ResolvedForYouCurrentPageRefreshBridge(
         stateField = stateField,
