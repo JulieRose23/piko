@@ -232,7 +232,15 @@ val disableTimelineRefreshPatch =
                 }
             }
 
-            val homeMatches = NewXHomeReselectFingerprint.scopedMatchAll()
+            val rawHomeMatches = NewXHomeReselectFingerprint.scopedMatchAll()
+            val homeMatches =
+                rawHomeMatches.filter { match ->
+                    val m = match.originalMethod.toString()
+                    !m.contains("<init>") &&
+                        !m.contains("/notifications/") &&
+                        !m.contains("/dms/") &&
+                        !m.contains("/di/")
+                }
             if (homeMatches.size != 1) {
                 throw PatchException(
                     "Expected one NewX home reselect handler, found ${homeMatches.size}: " +
