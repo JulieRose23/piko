@@ -43,6 +43,10 @@ import app.crimera.patches.common.parameterDescriptors
 import app.crimera.bytecode.Block
 import app.crimera.bytecode.Target
 import app.crimera.bytecode.fieldReference
+import com.android.tools.smali.dexlib2.AccessFlags
+import com.android.tools.smali.dexlib2.iface.reference.FieldReference
+import com.android.tools.smali.dexlib2.immutable.ImmutableField
+import com.android.tools.smali.dexlib2.immutable.reference.ImmutableFieldReference
 import app.crimera.bytecode.insertHook
 import app.crimera.bytecode.methodReference
 import app.crimera.patches.common.destinationRegisterOrNull
