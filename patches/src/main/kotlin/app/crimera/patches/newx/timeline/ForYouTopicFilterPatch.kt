@@ -632,29 +632,114 @@ private fun Method.tryResolveForYouCurrentPageRefreshBridge(
 ): ResolvedForYouCurrentPageRefreshBridge? {
     val instructions = implementation?.instructions?.toList() ?: return null
 
-    if ("$definingClass->$name" == "Lcom/x/home/tabbed/s;->g") {
-        val igets = instructions.mapNotNull { it.getReference<FieldReference>() }
-            .filter { it.type.contains("List") || it.definingClass.startsWith("Lcom/x/home/") }
-            .distinctBy { it.toString() }
-            .joinToString(" | ")
-        val invInterfaces = instructions.filter { it.opcode == Opcode.INVOKE_INTERFACE }
-            .mapNotNull { it.getReference<MethodReference>() }
-            .distinctBy { it.toString() }
-            .joinToString(" | ")
-        val invVirtuals = instructions.filter { it.opcode == Opcode.INVOKE_VIRTUAL }
-            .mapNotNull { it.getReference<MethodReference>() }
-            .filter { it.parameterTypes.isEmpty() && it.returnType == OBJECT_DESCRIPTOR }
-            .distinctBy { it.toString() }
-            .joinToString(" | ")
-        val types = instructions.mapNotNull { it.getReference<TypeReference>()?.type }
-            .distinct()
-            .joinToString(" | ")
-        throw PatchException(
-            "[DUMP s->g] dispatches=${clearAndRefreshEvent.dispatchParameterTypes} || " +
-                "igets=[$igets] || invVirt0=[$invVirtuals] || invIntf=[$invInterfaces] || types=[$types]"
-        )
-    }
-    return null
+    fun fieldAt(index: Int): FieldReference? =
+        instructions[index].getReference<FieldReference>()
+
+    fun typeAt(index: Int): String? =
+        instructions[index].getReference<TypeReference>()?.type
+
+    fun methodAt(index: Int): MethodReference? =
+        instructions[index].getReference<MethodReference>()
+
+    val allFields = instructions.mapNotNull { it.getReference<FieldReference>() }
+        .distinctBy(FieldReference::toString)
+    val allMethods = instructions.mapNotNull { it.getReference<MethodReference>() }
+        .distinctBy(MethodReference::toString)
+    val allTypes = instructions.mapNotNull { it.getReference<TypeReference>()?.type }
+        .distinct()
+
+    val stateField = allFields.firstOrNull { field ->
+        field.definingClass == definingClass &&
+            allMethods.any { m ->
+                m.definingClass == field.type &&
+                    m.returnType == OBJECT_DESCRIPTOR &&
+                    m.parameterTypes.isEmpty()
+            }
+    } ?: return null
+
+    val stateGetter = allMethods.firstOrNull { m ->
+        m.definingClass == stateField.type &&
+            m.returnType == OBJECT_DESCRIPTOR &&
+            m.parameterTypes.isEmpty()
+    } ?: return null
+
+    val pagesListField = allFields.firstOrNull { f -> f.type == OBJECT_LIST_DESCRIPTOR }
+        ?: return null
+    val pagesType = typeAt(
+        instructions.indexOfFirst { inst ->
+            inst.opcode == Opcode.CHECK_CAST &&
+                typeAt(instructions.indexOf(inst))?.contains("pages") == true
+        }.takeIf { it >= 0 } ?: -1
+    ) ?: pagesListField.definingClass
+
+    val pagesIndexField = allFields.firstOrNull { f ->
+        f.type == INTEGER_DESCRIPTOR && f.definingClass.startsWith("Lcom/x/home/")
+    } ?: allFields.firstOrNull { f ->
+        f.type == INTEGER_DESCRIPTOR
+    } ?: return null
+
+    val pageLookup = allMethods.firstOrNull { m ->
+        m.name == "get" &&
+            m.returnType == OBJECT_DESCRIPTOR &&
+            m.parameterTypes.map(CharSequence::toString) == listOf(INTEGER_DESCRIPTOR)
+    } ?: MethodReference(
+        definingClass = LIST_DESCRIPTOR,
+        name = "get",
+        parameterTypes = listOf(INTEGER_DESCRIPTOR),
+        returnType = OBJECT_DESCRIPTOR,
+    )
+
+    val forYouComponentType = allTypes.firstOrNull { t ->
+        t.startsWith("Lcom/x/home/foryou/")
+    } ?: allTypes.firstOrNull { t ->
+        t.startsWith("Lcom/x/home/") && !t.contains("tabbed")
+    } ?: "Lcom/x/home/foryou/x;"
+
+    val componentType = allTypes.firstOrNull { t ->
+        t != pagesType &&
+            t != forYouComponentType &&
+            allMethods.any { m ->
+                m.definingClass == t &&
+                    m.returnType == OBJECT_DESCRIPTOR &&
+                    m.parameterTypes.isEmpty()
+            }
+    } ?: stateField.type
+
+    val componentGetter = allMethods.firstOrNull { m ->
+        m.definingClass == componentType &&
+            m.returnType == OBJECT_DESCRIPTOR &&
+            m.parameterTypes.isEmpty()
+    } ?: stateGetter
+
+    val refreshDispatch = allMethods.firstOrNull { m ->
+        m.returnType == "V" &&
+            m.parameterTypes.size == 1 &&
+            m.parameterTypes.single().toString() in clearAndRefreshEvent.dispatchParameterTypes
+    } ?: return null
+
+    val forYouControllerField = allFields.firstOrNull { f ->
+        f.type == refreshDispatch.definingClass
+    } ?: allFields.firstOrNull { f ->
+        f.definingClass == forYouComponentType && !f.type.startsWith("Ljava/") && !f.type.startsWith("Lkotlinx/")
+    } ?: FieldReference(
+        definingClass = forYouComponentType,
+        name = "controller",
+        type = refreshDispatch.definingClass,
+    )
+
+    return ResolvedForYouCurrentPageRefreshBridge(
+        stateField = stateField,
+        stateGetter = stateGetter,
+        pagesType = pagesType,
+        pagesListField = pagesListField,
+        pagesIndexField = pagesIndexField,
+        pageLookup = pageLookup,
+        componentType = componentType,
+        componentGetter = componentGetter,
+        forYouComponentType = forYouComponentType,
+        forYouControllerField = forYouControllerField,
+        refreshDispatch = refreshDispatch,
+    )
 }
 /**
  * Re-dispatches a refresh of the For You page that is currently shown.
