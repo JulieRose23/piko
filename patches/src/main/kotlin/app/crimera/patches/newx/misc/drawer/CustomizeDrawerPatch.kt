@@ -194,20 +194,24 @@ private object NewXDrawerMenuItemFingerprint : Fingerprint(
 
 // FOOTER ROWS: settings/help/feedback/media/imprint/debug pass their localized title.
 private object NewXDrawerSharedFooterItemFingerprint : Fingerprint(
-    classFingerprint = NewXDrawerContentClassFingerprint,
+    definingClass = DRAWER_SCOPE,
     returnType = "V",
     custom = { method, _ ->
-        method.isDrawerRowRenderer() && method.parameterTypes.none { it.toString() == "Z" }
+        val params = method.parameterTypes.map(CharSequence::toString)
+        val isLegacyFooter = method.isDrawerRowRenderer() && params.none { it == "Z" }
+        val isNewXFooter =
+            params.size == 7 &&
+                params[0].startsWith("Lcom/x/icons/") &&
+                params[1].startsWith(DRAWER_SCOPE) &&
+                params[2] == FUNCTION0_DESCRIPTOR &&
+                params[3] == "Ljava/lang/String;" &&
+                params[4] == "Landroidx/compose/ui/Modifier;" &&
+                params[5] == COMPOSER_DESCRIPTOR &&
+                params[6] == "I"
+        isLegacyFooter || isNewXFooter
     },
 )
 
-/**
- * THEME PATH: sun/moon IconButton pinned to the drawer bottom (content-desc
- * drawer_display_settings, opens theme settings). Takes no title, so filter by stable ID.
- * Shares its parameter shape with the under-review badge renderer; the material3
- * IconButton call below is what distinguishes it. The material3 owner/param slots use
- * prefix/wildcard types because the IconButton class shifts between releases.
- */
 private object NewXDrawerThemeToggleFingerprint : Fingerprint(
     classFingerprint = NewXDrawerContentClassFingerprint,
     returnType = "V",
@@ -804,13 +808,43 @@ private fun resolveDrawerFooterTarget(
                 }
         }
     }
-    if (candidates.size != 1) {
-        throw PatchException(
-            "Expected one NewX drawer content lambda for ${renderer}, found " +
-                "${candidates.size}: ${candidates.joinToString { "${it.method} @${it.callIndex}" }}",
-        )
+    if (candidates.size == 1) {
+        return candidates.single()
     }
-    return candidates.single()
+
+    // 12.44+: footer rows are rendered dynamically inside a DRAWER_SCOPE Function3 lambda (h.smali)
+    // calling x;->i(Icon, y, Function0, String, Modifier, Composer, I)
+    val dynamicCalls = buildList {
+        classDefForEach { classDef ->
+            if (!classDef.type.startsWith(DRAWER_SCOPE)) return@classDefForEach
+            if (!classDef.interfaces.any { it.toString() in setOf(FUNCTION2_DESCRIPTOR, FUNCTION3_DESCRIPTOR) }) {
+                return@classDefForEach
+            }
+            val mutableClass = mutableClassDefBy(classDef.type)
+            mutableClass.methods
+                .filter { m -> m.name == "invoke" && m.returnType == OBJECT_DESCRIPTOR }
+                .forEach { method ->
+                    method.instructions.forEachIndexed { index, inst ->
+                        if (inst.opcode != Opcode.INVOKE_STATIC_RANGE) return@forEachIndexed
+                        val call = inst as? Instruction3rc ?: return@forEachIndexed
+                        val ref = inst.getReference<MethodReference>() ?: return@forEachIndexed
+                        if (ref.toSmaliDescriptor() == renderer.toSmaliDescriptor() &&
+                            call.registerCount == renderer.parameterTypes.size
+                        ) {
+                            add(DrawerFooterTarget(method, index, call, ref))
+                        }
+                    }
+                }
+        }
+    }
+    if (dynamicCalls.size == 1) {
+        return dynamicCalls.single()
+    }
+
+    throw PatchException(
+        "Expected one NewX drawer content lambda for ${renderer}, found " +
+            "${candidates.size} static / ${dynamicCalls.size} dynamic",
+    )
 }
 
 private fun MethodReference.toSmaliDescriptor(): String =
@@ -822,6 +856,21 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
     settingsIconType: String,
     showPikoSettingsInDrawer: ToggleSettingDefinition,
 ) {
+    val iconParamIndex = renderer.parameterTypes.indexOfFirst { it.toString().startsWith("Lcom/x/icons/") }
+    if (iconParamIndex == 0) {
+        // 12.44+ dynamic footer loop: only inject once right after the Settings item (icon == settingsIconField)
+        val settingsIconField = resolveSettingsIconField(settingsIconType)
+        val currentIconReg = target.call.startRegister
+        insertHook(
+            index = target.callIndex + 1,
+            excludedRegisters = (target.call.startRegister until target.call.startRegister + target.call.registerCount).toList(),
+            relocateBranchTargets = false,
+        ) {
+            val expectedIconReg = scratchRegister()
+            sgetObject(expectedIconReg, settingsIconField)
+            ifNe(currentIconReg, expectedIconReg, Target.Original)
+        }
+    }
     injectAdditionalDrawerRow(
         target = target,
         renderer = renderer,
@@ -832,11 +881,6 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
     )
 }
 
-/**
- * Emits one extra drawer row after an executed row call, reusing its registers for the
- * shared parameters. Each injection branches to the instruction that currently follows the call
- * (`Target.Original`), so sequential injections chain correctly.
- */
 private fun MutableMethod.injectAdditionalDrawerRow(
     target: DrawerFooterTarget,
     renderer: MethodReference,
