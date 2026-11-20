@@ -860,7 +860,26 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
 ) {
     val iconParamIndex = renderer.parameterTypes.indexOfFirst { it.toString().startsWith("Lcom/x/icons/") }
     if (iconParamIndex == 0) {
-        // 12.44+ dynamic footer loop: only inject once right after the Settings item (icon == settingsIconField)
+        // 12.44+ dynamic footer loop: inject only once right after the Settings item (icon == settingsIconField)
+        val guardFieldRef = ImmutableFieldReference(
+            definingClass,
+            "pikoDrawerSettingsEmitted",
+            "Z",
+        )
+        val hostClass = mutableClassDefBy(definingClass)
+        if (hostClass.fields.none { it.name == "pikoDrawerSettingsEmitted" }) {
+            hostClass.fields.add(
+                ImmutableField(
+                    definingClass,
+                    "pikoDrawerSettingsEmitted",
+                    "Z",
+                    AccessFlags.PRIVATE.value or AccessFlags.STATIC.value,
+                    null,
+                    null,
+                    emptySet(),
+                ),
+            )
+        }
         val currentIconReg = target.call.startRegister
         insertHook(
             index = target.callIndex + 1,
@@ -868,8 +887,13 @@ private fun MutableMethod.injectPikoSettingsDrawerItem(
             relocateBranchTargets = false,
         ) {
             val expectedIconReg = scratchRegister()
+            val alreadyEmittedReg = scratchRegister()
             sget(expectedIconReg, settingsIconField)
             ifNe(currentIconReg, expectedIconReg, Target.Original)
+            sget(alreadyEmittedReg, guardFieldRef)
+            ifNez(alreadyEmittedReg, Target.Original)
+            constBoolean(alreadyEmittedReg, true)
+            sput(alreadyEmittedReg, guardFieldRef)
         }
     }
     injectAdditionalDrawerRow(
