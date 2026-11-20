@@ -116,6 +116,7 @@ private data class ResolvedNavBarDestination(
     val method: MutableMethod,
     val callIndex: Int,
     val clickRegister: Int,
+    val targetItemClass: String? = null,
 )
 
 @Suppress("unused")
@@ -330,6 +331,133 @@ private fun resolveDrawerRowCalls(titleResourceIds: Set<Long>): List<DrawerRowCa
     }
 }
 
+private data class DynamicDrawerItemMapping(
+    val itemClass: String,
+    val titleResourceIds: Set<Int>,
+    val iconField: FieldReference,
+)
+
+private data class DynamicDrawerRendererTarget(
+    val method: MutableMethod,
+    val itemRegister: Int,
+    val clickRegister: Int,
+)
+
+private fun resolveDynamicDrawerRendererTarget(): DynamicDrawerRendererTarget? {
+    val drawerClasses = mutableListOf<com.android.tools.smali.dexlib2.iface.ClassDef>()
+    classDefForEach { classDef ->
+        if (classDef.type.startsWith("Lcom/x/main/drawer/")) {
+            drawerClasses.add(classDef)
+        }
+    }
+    val candidates = drawerClasses.flatMap { classDef ->
+        val mutableClass = mutableClassDefBy(classDef.type)
+        mutableClass.methods.mapNotNull { method ->
+            val params = method.parameterTypes.map(CharSequence::toString)
+            if (params.firstOrNull() != "Lcom/x/main/api/landing/x;") return@mapNotNull null
+            val clickParamIndex = params.indexOfLast { it == FUNCTION0_DESCRIPTOR }
+            if (clickParamIndex < 0) return@mapNotNull null
+            val hasRowCall = method.instructions.any { inst ->
+                inst.opcode == Opcode.INVOKE_STATIC_RANGE &&
+                    inst.getReference<MethodReference>()?.isDrawerRowRenderer() == true
+            }
+            if (!hasRowCall) return@mapNotNull null
+            var reg = method.p0Register
+            for (i in 0 until clickParamIndex) {
+                reg += if (params[i] == "J" || params[i] == "D") 2 else 1
+            }
+            DynamicDrawerRendererTarget(
+                method = method,
+                itemRegister = method.p0Register,
+                clickRegister = reg,
+            )
+        }
+    }
+    return candidates.singleOrNull()
+}
+
+private fun resolveDynamicDrawerItemMappings(): List<DynamicDrawerItemMapping> {
+    val drawerClasses = mutableListOf<com.android.tools.smali.dexlib2.iface.ClassDef>()
+    classDefForEach { classDef ->
+        if (classDef.type.startsWith("Lcom/x/main/drawer/")) {
+            drawerClasses.add(classDef)
+        }
+    }
+    val titleByClass = linkedMapOf<String, MutableSet<Int>>()
+    val iconByClass = linkedMapOf<String, FieldReference>()
+
+    for (classDef in drawerClasses) {
+        for (method in classDef.methods) {
+            val params = method.parameterTypes.map(CharSequence::toString)
+            if (params.firstOrNull() != "Lcom/x/main/api/landing/q0;") continue
+            val insns = method.implementation?.instructions?.toList() ?: continue
+
+            if (method.returnType == STRING_DESCRIPTOR) {
+                var currentClasses = mutableListOf<String>()
+                insns.forEachIndexed { idx, inst ->
+                    when (inst.opcode) {
+                        Opcode.SGET_OBJECT -> {
+                            val field = inst.getReference<FieldReference>()
+                            if (field != null && field.definingClass.startsWith("Lcom/x/main/api/landing/") && field.type == field.definingClass) {
+                                currentClasses.add(field.definingClass)
+                            }
+                        }
+                        Opcode.INSTANCE_OF -> {
+                            val typeRef = inst.getReference<TypeReference>()?.toString()
+                            if (typeRef != null && typeRef.startsWith("Lcom/x/main/api/landing/")) {
+                                currentClasses.add(typeRef)
+                            }
+                        }
+                        Opcode.CONST, Opcode.CONST_16, Opcode.CONST_HIGH16 -> {
+                            val lit = (inst as? com.android.tools.smali.dexlib2.iface.instruction.NarrowLiteralInstruction)?.narrowLiteral
+                            if (lit != null && (lit ushr 16) == 0x7f13 && currentClasses.isNotEmpty()) {
+                                currentClasses.forEach { cls ->
+                                    titleByClass.getOrPut(cls) { linkedSetOf() }.add(lit)
+                                }
+                            }
+                        }
+                        Opcode.RETURN_OBJECT -> {
+                            currentClasses = mutableListOf()
+                        }
+                        else -> Unit
+                    }
+                }
+            } else if (method.returnType == "Lcom/x/icons/b;") {
+                var currentClasses = mutableListOf<String>()
+                insns.forEach { inst ->
+                    when (inst.opcode) {
+                        Opcode.SGET_OBJECT -> {
+                            val field = inst.getReference<FieldReference>()
+                            if (field != null && field.definingClass.startsWith("Lcom/x/main/api/landing/") && field.type == field.definingClass) {
+                                currentClasses.add(field.definingClass)
+                            } else if (field != null && field.type == "Lcom/x/icons/b;" && currentClasses.isNotEmpty()) {
+                                currentClasses.forEach { cls ->
+                                    iconByClass.putIfAbsent(cls, field)
+                                }
+                            }
+                        }
+                        Opcode.INSTANCE_OF -> {
+                            val typeRef = inst.getReference<TypeReference>()?.toString()
+                            if (typeRef != null && typeRef.startsWith("Lcom/x/main/api/landing/")) {
+                                currentClasses.add(typeRef)
+                            }
+                        }
+                        Opcode.RETURN_OBJECT -> {
+                            currentClasses = mutableListOf()
+                        }
+                        else -> Unit
+                    }
+                }
+            }
+        }
+    }
+
+    return titleByClass.mapNotNull { (cls, titles) ->
+        val icon = iconByClass[cls] ?: return@mapNotNull null
+        DynamicDrawerItemMapping(cls, titles, icon)
+    }
+}
+
 private fun resolveNavBarDestination(
     spec: NavBarDestinationSpec,
 ): ResolvedNavBarDestination {
@@ -337,7 +465,30 @@ private fun resolveNavBarDestination(
     val alternateTitleResourceId =
         spec.alternateTitleResourceName?.let { resourceId(ResourceType.STRING, it) }
     val titleResourceIds = listOfNotNull(titleResourceId, alternateTitleResourceId).toSet()
-    val matches = resolveDrawerRowCalls(titleResourceIds).filter { it.titleResourceId.toLong() in titleResourceIds }
+    val legacyMatches = resolveDrawerRowCalls(titleResourceIds).filter { it.titleResourceId.toLong() in titleResourceIds }
+    if (legacyMatches.isEmpty()) {
+        val rendererTarget = resolveDynamicDrawerRendererTarget()
+        val mappings = resolveDynamicDrawerItemMappings()
+        if (rendererTarget != null && mappings.isNotEmpty()) {
+            val matchedMappings = mappings.filter { mapping ->
+                mapping.titleResourceIds.any { it.toLong() in titleResourceIds }
+            }
+            val chosen = requireExactlyOne(
+                "NewX dynamic drawer item for ${spec.titleResourceName}",
+                matchedMappings,
+            ) { "${it.itemClass} -> ${it.titleResourceIds}" }
+            return ResolvedNavBarDestination(
+                spec = spec,
+                titleResourceId = titleResourceId,
+                iconField = chosen.iconField,
+                method = rendererTarget.method,
+                callIndex = 0,
+                clickRegister = rendererTarget.clickRegister,
+                targetItemClass = chosen.itemClass,
+            )
+        }
+    }
+    val matches = legacyMatches
     val row =
         requireExactlyOne(
             "NewX drawer row for ${spec.titleResourceName}",
@@ -540,16 +691,42 @@ private fun injectDestinationClickCaptures(destinations: List<ResolvedNavBarDest
             returnVoid()
         }
 
-        destination.method.insertHook(destination.callIndex, relocateBranchTargets = false) {
-            invokeStatic(
-                ImmutableMethodReference(
-                    NAV_BAR_REPLACEMENT_DESCRIPTOR,
-                    bridgeName,
-                    listOf(FUNCTION0_DESCRIPTOR),
-                    "V",
-                ),
-                destination.clickRegister,
-            )
+        val targetClass = destination.targetItemClass
+        if (targetClass != null) {
+            val itemReg = destination.method.p0Register
+            val clickReg = destination.clickRegister
+            destination.method.insertHook(
+                index = 0,
+                excludedRegisters = listOf(itemReg, clickReg),
+                relocateBranchTargets = false,
+            ) {
+                val condReg = scratchRegister()
+                val lowItemReg = scratchRegister()
+                move(lowItemReg, itemReg, "Lcom/x/main/api/landing/x;")
+                instanceOf(condReg, lowItemReg, targetClass)
+                ifEqz(condReg, Target.Original)
+                invokeStatic(
+                    ImmutableMethodReference(
+                        NAV_BAR_REPLACEMENT_DESCRIPTOR,
+                        bridgeName,
+                        listOf(FUNCTION0_DESCRIPTOR),
+                        "V",
+                    ),
+                    clickReg,
+                )
+            }
+        } else {
+            destination.method.insertHook(destination.callIndex, relocateBranchTargets = false) {
+                invokeStatic(
+                    ImmutableMethodReference(
+                        NAV_BAR_REPLACEMENT_DESCRIPTOR,
+                        bridgeName,
+                        listOf(FUNCTION0_DESCRIPTOR),
+                        "V",
+                    ),
+                    destination.clickRegister,
+                )
+            }
         }
     }
 }
