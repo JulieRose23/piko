@@ -1,6 +1,7 @@
 package app.crimera.patches.newx.misc.navbar
 
 import app.morphe.patcher.patch.classDefByOrNull
+import app.morphe.patcher.patch.classDefForEach
 import app.morphe.patcher.Fingerprint
 import app.morphe.patcher.Match
 import app.morphe.patcher.anyInstruction
@@ -660,7 +661,7 @@ internal fun Instruction.referencesMethod(descriptor: String): Boolean =
 internal fun MethodReference.toSmaliDescriptor(): String =
     "${definingClass}->${name}(${parameterTypes.joinToString("")})${returnType}"
 
-internal fun BytecodePatchContext.resolveTabIconFieldsFromHelper(
+internal fun resolveTabIconFieldsFromHelper(
     navigationType: String,
 ): Map<String, FieldReference> {
     val iconHelperCandidates = buildList {
