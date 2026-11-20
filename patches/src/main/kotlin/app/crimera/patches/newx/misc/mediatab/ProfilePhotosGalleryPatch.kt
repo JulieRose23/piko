@@ -1160,8 +1160,19 @@ private fun resolveNativePhotoViewerTarget(
     // the controller field's class must declare a (destination, Z) -> V method whose
     // destination is a supertype of the resolved route (kj/k(jj,Z) on old targets,
     // sj/k(rj,Z) on alpha.04). Never hardcode either descriptor; R8 reassigns them.
-    val navigationCandidates =
+    val ignoredNavigationPrefixes = listOf(
+        "Lcom/google/",
+        "Lcom/android/",
+        "Landroidx/",
+        "Lkotlin/",
+        "Ljava/",
+        "Ljavax/",
+    )
+    val rawNavigationCandidates =
         hostClass.fields.flatMap { field ->
+            if (ignoredNavigationPrefixes.any { field.type.startsWith(it) }) {
+                return@flatMap emptyList()
+            }
             val navigationClass =
                 runCatching { mutableClassDefBy(field.type) }.getOrNull()
                     ?: return@flatMap emptyList()
@@ -1174,6 +1185,16 @@ private fun resolveNativePhotoViewerTarget(
                 Triple(field, method, parameters[0])
             }
         }
+    val referencedInHost = rawNavigationCandidates.filter { (_, method, destination) ->
+        val desc = methodDescriptor(
+            owner = method.definingClass,
+            name = method.name,
+            parameters = listOf(destination, "Z"),
+            returnType = "V",
+        )
+        desc in hostAccessorDescriptors
+    }
+    val navigationCandidates = referencedInHost.ifEmpty { rawNavigationCandidates }
     val navigation =
         requireExactlyOne(
             label = "NewX native photo navigation (controller field, call, destination)",
