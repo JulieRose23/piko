@@ -240,6 +240,44 @@ private fun patchServerErrorConstructors() {
     }
 }
 
+private fun patchParameterizedSubmitFailureMethod(method: MutableMethod): Boolean {
+    val paramTypes = method.parameterTypes.map(CharSequence::toString)
+    val throwableParamIndex = paramTypes.indexOf(THROWABLE_DESCRIPTOR)
+    if (throwableParamIndex < 0) return false
+
+    val implementation = method.implementation
+        ?: throw PatchException("NewX submit work handler has no implementation: $method")
+    val isStatic = (method.accessFlags and com.android.tools.smali.dexlib2.AccessFlags.STATIC.value) != 0
+    var paramWordOffset = if (isStatic) 0 else 1
+    for (i in 0 until throwableParamIndex) {
+        paramWordOffset += if (paramTypes[i] == "J" || paramTypes[i] == "D") 2 else 1
+    }
+    var totalParamWords = if (isStatic) 0 else 1
+    for (type in paramTypes) {
+        totalParamWords += if (type == "J" || type == "D") 2 else 1
+    }
+    val firstParamRegister = implementation.registerCount - totalParamWords
+    val throwableRegister = firstParamRegister + paramWordOffset
+    if (firstParamRegister < 1 || throwableRegister !in 0..15) {
+        throw PatchException(
+            "NewX parameterized submit handler registers out of range: " +
+                "firstParam=v$firstParamRegister, throwable=v$throwableRegister",
+        )
+    }
+
+    method.insertHook(0, relocateBranchTargets = false) {
+        const(0, 0)
+        invokeStatic(
+            methodReference(
+                "$LOGGER_DESCRIPTOR->captureSubmitFailure(${THROWABLE_DESCRIPTOR}Ljava/lang/Object;)V",
+            ),
+            throwableRegister,
+            0,
+        )
+    }
+    return true
+}
+
 private fun patchSubmitFailureHandler() {
     val matches = runCatching { SubmitWorkHandlerFingerprint.scopedMatchAll() }.getOrElse { emptyList() }
     if (matches.size == 1) {
@@ -252,11 +290,21 @@ private fun patchSubmitFailureHandler() {
                 matches.joinToString { "${it.originalClassDef.type}->${it.originalMethod}" },
         )
     }
+
     val readOnlyCandidates = buildList<com.android.tools.smali.dexlib2.iface.Method> {
         classDefForEach { classDef ->
-            if (!classDef.type.startsWith("Lcom/x/")) return@classDefForEach
             classDef.methods.forEach { method ->
+                if (method.name == "\$values") return@forEach
                 val instructions = method.implementation?.instructions?.toList() ?: return@forEach
+                val postFailureFields = findEventFields(instructions, POST_FAILURE_FIELD_NAME)
+                if (postFailureFields.isEmpty()) return@forEach
+
+                val hasThrowableParam = method.parameterTypes.any { it.toString() == THROWABLE_DESCRIPTOR }
+                if (hasThrowableParam) {
+                    add(method)
+                    return@forEach
+                }
+
                 val throwableIndices = instructions.mapIndexedNotNull { index, instruction ->
                     val field = instruction.getReference<FieldReference>() ?: return@mapIndexedNotNull null
                     if (instruction.opcode == Opcode.IGET_OBJECT && field.type == THROWABLE_DESCRIPTOR) {
@@ -265,33 +313,37 @@ private fun patchSubmitFailureHandler() {
                         null
                     }
                 }
-                if (throwableIndices.size != 1) return@forEach
-                val throwableIndex = throwableIndices.single()
-                val postFailureAfterThrowable = findEventFields(instructions, POST_FAILURE_FIELD_NAME)
-                    .count { event -> event.index > throwableIndex }
-                if (postFailureAfterThrowable == 1) {
-                    add(method)
+                if (throwableIndices.size == 1) {
+                    val throwableIndex = throwableIndices.single()
+                    if (postFailureFields.count { event -> event.index > throwableIndex } == 1) {
+                        add(method)
+                    }
                 }
             }
         }
     }
-    val inComposerWorkScope = readOnlyCandidates.filter { method ->
-        method.definingClass.startsWith(COMPOSER_WORK_SCOPE)
-    }
-    val fallbackMethods = inComposerWorkScope.ifEmpty { readOnlyCandidates }
-    if (fallbackMethods.size != 1) {
+
+    val preferredCandidates = readOnlyCandidates.filter { method ->
+        method.parameterTypes.any { it.toString() == THROWABLE_DESCRIPTOR } &&
+            method.returnType == "V"
+    }.ifEmpty { readOnlyCandidates }
+
+    if (preferredCandidates.size != 1) {
         throw PatchException(
-            "Expected one NewX submit work handler, found ${fallbackMethods.size}: " +
-                fallbackMethods.joinToString { "${it.definingClass}->$it" },
+            "Expected one NewX submit work handler, found ${preferredCandidates.size}: " +
+                preferredCandidates.joinToString { "${it.definingClass}->$it" },
         )
     }
-    val target = fallbackMethods.single()
+
+    val target = preferredCandidates.single()
     val mutableMethod = mutableClassDefBy(target.definingClass).methods.first { candidate ->
         candidate.name == target.name &&
             candidate.returnType == target.returnType &&
             candidate.parameterTypes.map(CharSequence::toString) == target.parameterTypes.map(CharSequence::toString)
     }
-    patchSubmitFailureMethod(mutableMethod)
+    if (!patchParameterizedSubmitFailureMethod(mutableMethod)) {
+        patchSubmitFailureMethod(mutableMethod)
+    }
 }
 
 private fun patchSubmitFailureMethod(method: MutableMethod) {
