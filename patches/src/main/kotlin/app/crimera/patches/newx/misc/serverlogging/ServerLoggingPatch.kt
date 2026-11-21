@@ -252,11 +252,10 @@ private fun patchSubmitFailureHandler() {
                 matches.joinToString { "${it.originalClassDef.type}->${it.originalMethod}" },
         )
     }
-    val structuralCandidates = buildList<MutableMethod> {
+    val readOnlyCandidates = buildList<com.android.tools.smali.dexlib2.iface.Method> {
         classDefForEach { classDef ->
-            val mutableClass = runCatching { mutableClassDefBy(classDef.type) }.getOrNull()
-                ?: return@classDefForEach
-            mutableClass.methods.forEach { method ->
+            if (!classDef.type.startsWith("Lcom/x/")) return@classDefForEach
+            classDef.methods.forEach { method ->
                 val instructions = method.implementation?.instructions ?: return@forEach
                 val throwableIndices = instructions.mapIndexedNotNull { index, instruction ->
                     val field = instruction.getReference<FieldReference>() ?: return@mapIndexedNotNull null
@@ -276,17 +275,23 @@ private fun patchSubmitFailureHandler() {
             }
         }
     }
-    val inComposerWorkScope = structuralCandidates.filter { method ->
+    val inComposerWorkScope = readOnlyCandidates.filter { method ->
         method.definingClass.startsWith(COMPOSER_WORK_SCOPE)
     }
-    val fallbackMethods = inComposerWorkScope.ifEmpty { structuralCandidates }
+    val fallbackMethods = inComposerWorkScope.ifEmpty { readOnlyCandidates }
     if (fallbackMethods.size != 1) {
         throw PatchException(
             "Expected one NewX submit work handler, found ${fallbackMethods.size}: " +
                 fallbackMethods.joinToString { "${it.definingClass}->$it" },
         )
     }
-    patchSubmitFailureMethod(fallbackMethods.single())
+    val target = fallbackMethods.single()
+    val mutableMethod = mutableClassDefBy(target.definingClass).methods.first { candidate ->
+        candidate.name == target.name &&
+            candidate.returnType == target.returnType &&
+            candidate.parameterTypes.map(CharSequence::toString) == target.parameterTypes.map(CharSequence::toString)
+    }
+    patchSubmitFailureMethod(mutableMethod)
 }
 
 private fun patchSubmitFailureMethod(method: MutableMethod) {
