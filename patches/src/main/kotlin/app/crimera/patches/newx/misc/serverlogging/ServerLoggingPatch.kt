@@ -256,7 +256,7 @@ private fun patchSubmitFailureHandler() {
         classDefForEach { classDef ->
             if (!classDef.type.startsWith("Lcom/x/")) return@classDefForEach
             classDef.methods.forEach { method ->
-                val instructions = method.implementation?.instructions ?: return@forEach
+                val instructions = method.implementation?.instructions?.toList() ?: return@forEach
                 val throwableIndices = instructions.mapIndexedNotNull { index, instruction ->
                     val field = instruction.getReference<FieldReference>() ?: return@mapIndexedNotNull null
                     if (instruction.opcode == Opcode.IGET_OBJECT && field.type == THROWABLE_DESCRIPTOR) {
