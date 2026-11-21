@@ -1115,6 +1115,38 @@ private fun resolveAccentRamp(
     return standardScales.first()
 }
 
+
+private fun hookN3ActiveLikeTint() {
+    classDefForEach { classDef ->
+        if (!classDef.type.startsWith("Lcom/x/")) return@classDefForEach
+        classDef.methods.forEach { method ->
+            val insns = method.implementation?.instructions?.toList() ?: return@forEach
+            val targetIndices = insns.mapIndexedNotNull { idx, insn ->
+                if (insn.opcode == Opcode.SGET_WIDE) {
+                    val field = insn.getReference<FieldReference>()
+                    if (field?.definingClass == "Lcom/x/compose/core/n3;" && field.name == "M1") {
+                        idx
+                    } else null
+                } else null
+            }
+            if (targetIndices.isEmpty()) return@forEach
+            val mutableMethod = mutableClassDefBy(classDef.type).methods.firstOrNull { m ->
+                m.name == method.name &&
+                    m.returnType == method.returnType &&
+                    m.parameterTypes.map(CharSequence::toString) == method.parameterTypes.map(CharSequence::toString)
+            } ?: return@forEach
+            val mutableInsns = mutableMethod.instructions.toList()
+            targetIndices.asReversed().forEach { idx ->
+                val reg = (mutableInsns.getOrNull(idx) as? OneRegisterInstruction)?.registerA ?: return@forEach
+                mutableMethod.insertHook(idx + 1, relocateBranchTargets = false) {
+                    invokeStatic(methodReference(INLINE_ACTION_ACTIVE_TINT_METHOD), reg, reg + 1)
+                    moveResult(reg, "J")
+                }
+            }
+        }
+    }
+}
+
 private fun patchInlineActionTints() {
     val models = resolvedNewXInlineActionModels()
     val inlineActionEntryClass = mutableClassDefBy(models.inlineActionEntryDescriptor)
@@ -1289,6 +1321,7 @@ private fun patchInlineActionTints() {
             },
         )
     }
+    hookN3ActiveLikeTint()
 }
 
 /** The unified icon/button composable consumes two action callbacks and both tint planes. */
