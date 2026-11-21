@@ -2692,6 +2692,7 @@ private fun MutableMethod.injectActivatedLikeTint(unfavoriteIndex: Int): Resolve
             }
         }
     }
+    if (colorCandidates.isEmpty()) return
     val colorLoad =
         requireExactlyOne("NewX activated-like tint load in the active branch", colorCandidates)
     val activeLikeField = colorLoad.value.getReference<FieldReference>()
