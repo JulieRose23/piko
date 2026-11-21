@@ -63,12 +63,20 @@ internal object SubscriptionsFeaturesOfflinePremiumFingerprint : Fingerprint(
     },
 )
 
-// Global feature flag used by every offline-video surface.
+// Global feature flag (or Premium+ gate in 12.45+) used by every offline-video surface.
 internal object SubscriptionsFeaturesOfflineVideoEnabledFingerprint : Fingerprint(
     definingClass = "Lcom/x/subscriptions/",
     returnType = "Z",
     parameters = emptyList(),
-    filters = listOf(string("subscriptions_feature_offline_video")),
+    custom = { method, _ ->
+        val strings = method.implementation?.instructions
+            ?.mapNotNull { it.getReference<StringReference>()?.string }
+            .orEmpty()
+        "subscriptions_feature_offline_video" in strings ||
+            ("feature/premium_plus" in strings &&
+                "feature/twitter_blue_verified" !in strings &&
+                "feature/premium_basic" !in strings)
+    },
 )
 
 private const val DOWNLOADABLE_TEXT = ", isDownloadable="
