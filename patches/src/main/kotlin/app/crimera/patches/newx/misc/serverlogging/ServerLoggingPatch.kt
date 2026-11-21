@@ -241,7 +241,7 @@ private fun patchServerErrorConstructors() {
 }
 
 private fun patchSubmitFailureHandler() {
-    val matches = SubmitWorkHandlerFingerprint.scopedMatchAll()
+    val matches = runCatching { SubmitWorkHandlerFingerprint.scopedMatchAll() }.getOrElse { emptyList() }
     if (matches.size == 1) {
         patchSubmitFailureMethod(matches.single().method)
         return
