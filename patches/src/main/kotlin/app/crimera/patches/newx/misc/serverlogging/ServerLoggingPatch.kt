@@ -247,7 +247,7 @@ private fun patchParameterizedSubmitFailureMethod(method: MutableMethod): Boolea
 
     val implementation = method.implementation
         ?: throw PatchException("NewX submit work handler has no implementation: $method")
-    val isStatic = (method.accessFlags and com.android.tools.smali.dexlib2.AccessFlags.STATIC.value) != 0
+    val isStatic = java.lang.reflect.Modifier.isStatic(method.accessFlags)
     var paramWordOffset = if (isStatic) 0 else 1
     for (i in 0 until throwableParamIndex) {
         paramWordOffset += if (paramTypes[i] == "J" || paramTypes[i] == "D") 2 else 1
@@ -258,7 +258,7 @@ private fun patchParameterizedSubmitFailureMethod(method: MutableMethod): Boolea
     }
     val firstParamRegister = implementation.registerCount - totalParamWords
     val throwableRegister = firstParamRegister + paramWordOffset
-    if (firstParamRegister < 1 || throwableRegister !in 0..15) {
+    if (firstParamRegister !in 0..15 || throwableRegister !in 0..15) {
         throw PatchException(
             "NewX parameterized submit handler registers out of range: " +
                 "firstParam=v$firstParamRegister, throwable=v$throwableRegister",
@@ -266,13 +266,12 @@ private fun patchParameterizedSubmitFailureMethod(method: MutableMethod): Boolea
     }
 
     method.insertHook(0, relocateBranchTargets = false) {
-        const(0, 0)
         invokeStatic(
             methodReference(
                 "$LOGGER_DESCRIPTOR->captureSubmitFailure(${THROWABLE_DESCRIPTOR}Ljava/lang/Object;)V",
             ),
             throwableRegister,
-            0,
+            firstParamRegister,
         )
     }
     return true
