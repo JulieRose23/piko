@@ -239,12 +239,11 @@ private fun patchServerErrorConstructors() {
     }
 }
 
-private fun findFallbackSubmitFailureMethods(): List<MutableMethod> {
+private fun BytecodePatchContext.findFallbackSubmitFailureMethods(): List<MutableMethod> {
     val structuralCandidates = mutableListOf<MutableMethod>()
-    val classDefs = allClassDefs()
-    classDefs.forEach { classDef ->
+    classDefForEach { classDef ->
         val mutableClass = runCatching { mutableClassDefBy(classDef.type) }.getOrNull()
-            ?: return@forEach
+            ?: return@classDefForEach
         mutableClass.methods.forEach { method ->
             val instructions = method.implementation?.instructions ?: return@forEach
             val throwableIndices = instructions.mapIndexedNotNull { index: Int, instruction: Instruction ->
