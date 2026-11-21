@@ -239,15 +239,55 @@ private fun patchServerErrorConstructors() {
     }
 }
 
+private fun findFallbackSubmitFailureMethods(): List<MutableMethod> {
+    val structuralCandidates = mutableListOf<MutableMethod>()
+    classDefForEach { classDef ->
+        val mutableClass = mutableClassDefByOrNull(classDef.type) ?: return@classDefForEach
+        mutableClass.methods.forEach { method ->
+            val instructions = method.implementation?.instructions ?: return@forEach
+            val throwableIndices = instructions.mapIndexedNotNull { index, instruction ->
+                val field = instruction.getReference<FieldReference>()
+                if (instruction.opcode == Opcode.IGET_OBJECT && field?.type == THROWABLE_DESCRIPTOR) {
+                    index
+                } else {
+                    null
+                }
+            }
+            if (throwableIndices.size != 1) return@forEach
+            val throwableIndex = throwableIndices.single()
+            val postFailureAfterThrowable = findEventFields(instructions, POST_FAILURE_FIELD_NAME)
+                .count { it.index > throwableIndex }
+            if (postFailureAfterThrowable == 1) {
+                structuralCandidates.add(method)
+            }
+        }
+    }
+    val inComposerWorkScope = structuralCandidates.filter {
+        it.definingClass.startsWith(COMPOSER_WORK_SCOPE)
+    }
+    return inComposerWorkScope.ifEmpty { structuralCandidates }
+}
+
 private fun patchSubmitFailureHandler() {
     val matches = SubmitWorkHandlerFingerprint.scopedMatchAll()
-    if (matches.size != 1) {
+    if (matches.size == 1) {
+        patchSubmitFailureMethod(matches.single().method)
+        return
+    }
+    if (matches.size > 1) {
         throw PatchException(
             "Expected one NewX submit work handler, found ${matches.size}: " +
                 matches.joinToString { "${it.originalClassDef.type}->${it.originalMethod}" },
         )
     }
-    patchSubmitFailureMethod(matches.single().method)
+    val fallbackMethods = findFallbackSubmitFailureMethods()
+    if (fallbackMethods.size != 1) {
+        throw PatchException(
+            "Expected one NewX submit work handler, found ${fallbackMethods.size}: " +
+                fallbackMethods.joinToString { "${it.definingClass}->$it" },
+        )
+    }
+    patchSubmitFailureMethod(fallbackMethods.single())
 }
 
 private fun patchSubmitFailureMethod(method: MutableMethod) {
