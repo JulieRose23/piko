@@ -1490,7 +1490,10 @@ private fun isTabIndicatorRenderer(method: Method): Boolean {
 
 private fun tabSlotColorsFingerprint(horizon: String) = Fingerprint(
     definingClass = TAB_RENDERER_SCOPE,
-    custom = { method, _ -> isTabSlotColors(method, horizon) },
+    custom = { method, _ ->
+        "Landroidx/compose/runtime/Composer;" in method.parameterTypes &&
+            isTabSlotColors(method, horizon)
+    },
 )
 
 private object NewXTabIndicatorRendererFingerprint : Fingerprint(
