@@ -54,21 +54,10 @@ private const val LOGGER_DESCRIPTOR = "$EXTENSION_PACKAGE/settings/NewXLogger;"
 private object SubmitWorkHandlerFingerprint : Fingerprint(
     definingClass = COMPOSER_WORK_SCOPE,
     returnType = OBJECT_DESCRIPTOR,
-    parameters = listOf(
-        "L",
-        "L",
-        FUNCTION_2_DESCRIPTOR,
-        FUNCTION_2_DESCRIPTOR,
-        FUNCTION_1_DESCRIPTOR,
-        "Z",
-        "I",
-        CONTINUATION_DESCRIPTOR,
-    ),
     filters = listOf(
         string("SubmitWorkHandler"),
         // Failure result throwable.
         fieldAccess(opcode = Opcode.IGET_OBJECT, type = THROWABLE_DESCRIPTOR),
-        fieldAccess(opcode = Opcode.SGET_OBJECT, name = POST_FAILURE_FIELD_NAME),
     ),
 )
 
