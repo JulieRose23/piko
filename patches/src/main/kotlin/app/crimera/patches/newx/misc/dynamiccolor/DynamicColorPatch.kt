@@ -1310,16 +1310,17 @@ private fun patchInlineActionTints() {
             }
         }
     }
-    val activatedTint = tintMethod.injectActivatedLikeTint(unfavoriteRead.index)
-    if (likeComposableConstructor != null) {
-        patchLikeIconComposable(likeComposableConstructor.definingClass, activatedTint.field)
-    } else {
-        requireExactlyOne(
-            "NewX unified like-button renderer receiving the activated tint",
-            unifiedLikeRendererCandidates.filter { candidate ->
-                candidate.index == activatedTint.rendererCallIndex
-            },
-        )
+    tintMethod.injectActivatedLikeTint(unfavoriteRead.index)?.let { activatedTint ->
+        if (likeComposableConstructor != null) {
+            patchLikeIconComposable(likeComposableConstructor.definingClass, activatedTint.field)
+        } else {
+            requireExactlyOne(
+                "NewX unified like-button renderer receiving the activated tint",
+                unifiedLikeRendererCandidates.filter { candidate ->
+                    candidate.index == activatedTint.rendererCallIndex
+                },
+            )
+        }
     }
     hookN3ActiveLikeTint()
 }
@@ -2613,7 +2614,7 @@ private fun MutableMethod.composeRendererCallsForWideValue(
     }
 }
 
-private fun MutableMethod.injectActivatedLikeTint(unfavoriteIndex: Int): ResolvedActivatedLikeTint {
+private fun MutableMethod.injectActivatedLikeTint(unfavoriteIndex: Int): ResolvedActivatedLikeTint? {
     val methodInstructions = instructions.toList()
     val unfavoriteRead = methodInstructions.getOrNull(unfavoriteIndex)
         ?: throw PatchException("NewX Unfavorite enum read is out of bounds: $this")
@@ -2692,7 +2693,7 @@ private fun MutableMethod.injectActivatedLikeTint(unfavoriteIndex: Int): Resolve
             }
         }
     }
-    if (colorCandidates.isEmpty()) return
+    if (colorCandidates.isEmpty()) return null
     val colorLoad =
         requireExactlyOne("NewX activated-like tint load in the active branch", colorCandidates)
     val activeLikeField = colorLoad.value.getReference<FieldReference>()
