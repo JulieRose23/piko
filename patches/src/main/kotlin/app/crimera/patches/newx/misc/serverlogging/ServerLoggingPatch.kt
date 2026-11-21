@@ -241,11 +241,13 @@ private fun patchServerErrorConstructors() {
 
 private fun findFallbackSubmitFailureMethods(): List<MutableMethod> {
     val structuralCandidates = mutableListOf<MutableMethod>()
-    classDefForEach { classDef ->
-        val mutableClass = mutableClassDefByOrNull(classDef.type) ?: return@classDefForEach
+    val classDefs = allClassDefs()
+    classDefs.forEach { classDef ->
+        val mutableClass = runCatching { mutableClassDefBy(classDef.type) }.getOrNull()
+            ?: return@forEach
         mutableClass.methods.forEach { method ->
             val instructions = method.implementation?.instructions ?: return@forEach
-            val throwableIndices = instructions.mapIndexedNotNull { index, instruction ->
+            val throwableIndices = instructions.mapIndexedNotNull { index: Int, instruction: Instruction ->
                 val field = instruction.getReference<FieldReference>()
                 if (instruction.opcode == Opcode.IGET_OBJECT && field?.type == THROWABLE_DESCRIPTOR) {
                     index
@@ -256,14 +258,14 @@ private fun findFallbackSubmitFailureMethods(): List<MutableMethod> {
             if (throwableIndices.size != 1) return@forEach
             val throwableIndex = throwableIndices.single()
             val postFailureAfterThrowable = findEventFields(instructions, POST_FAILURE_FIELD_NAME)
-                .count { it.index > throwableIndex }
+                .count { event -> event.index > throwableIndex }
             if (postFailureAfterThrowable == 1) {
                 structuralCandidates.add(method)
             }
         }
     }
-    val inComposerWorkScope = structuralCandidates.filter {
-        it.definingClass.startsWith(COMPOSER_WORK_SCOPE)
+    val inComposerWorkScope = structuralCandidates.filter { method ->
+        method.definingClass.startsWith(COMPOSER_WORK_SCOPE)
     }
     return inComposerWorkScope.ifEmpty { structuralCandidates }
 }
