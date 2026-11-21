@@ -239,22 +239,23 @@ private fun patchServerErrorConstructors() {
     }
 }
 
-private fun BytecodePatchContext.findFallbackSubmitFailureMethods(): List<MutableMethod> {
+private fun findFallbackSubmitFailureMethods(
+    classDefs: Iterable<com.android.tools.smali.dexlib2.iface.ClassDef>,
+    resolveMutableClass: (String) -> MutableClass?,
+): List<MutableMethod> {
     val structuralCandidates = mutableListOf<MutableMethod>()
-    classDefForEach { classDef ->
-        val mutableClass = runCatching { mutableClassDefBy(classDef.type) }.getOrNull()
-            ?: return@classDefForEach
-        mutableClass.methods.forEach { method ->
-            val instructions = method.implementation?.instructions ?: return@forEach
-            val throwableIndices = instructions.mapIndexedNotNull { index: Int, instruction: Instruction ->
+    for (classDef in classDefs) {
+        val mutableClass = resolveMutableClass(classDef.type) ?: continue
+        for (method in mutableClass.methods) {
+            val instructions = method.implementation?.instructions ?: continue
+            val throwableIndices = mutableListOf<Int>()
+            for ((index, instruction) in instructions.withIndex()) {
                 val field = instruction.getReference<FieldReference>()
                 if (instruction.opcode == Opcode.IGET_OBJECT && field?.type == THROWABLE_DESCRIPTOR) {
-                    index
-                } else {
-                    null
+                    throwableIndices.add(index)
                 }
             }
-            if (throwableIndices.size != 1) return@forEach
+            if (throwableIndices.size != 1) continue
             val throwableIndex = throwableIndices.single()
             val postFailureAfterThrowable = findEventFields(instructions, POST_FAILURE_FIELD_NAME)
                 .count { event -> event.index > throwableIndex }
@@ -266,7 +267,7 @@ private fun BytecodePatchContext.findFallbackSubmitFailureMethods(): List<Mutabl
     val inComposerWorkScope = structuralCandidates.filter { method ->
         method.definingClass.startsWith(COMPOSER_WORK_SCOPE)
     }
-    return inComposerWorkScope.ifEmpty { structuralCandidates }
+    return if (inComposerWorkScope.isNotEmpty()) inComposerWorkScope else structuralCandidates
 }
 
 private fun patchSubmitFailureHandler() {
@@ -281,7 +282,13 @@ private fun patchSubmitFailureHandler() {
                 matches.joinToString { "${it.originalClassDef.type}->${it.originalMethod}" },
         )
     }
-    val fallbackMethods = findFallbackSubmitFailureMethods()
+    val allClasses = buildList {
+        classDefForEach { classDef -> add(classDef) }
+    }
+    val fallbackMethods = findFallbackSubmitFailureMethods(
+        classDefs = allClasses,
+        resolveMutableClass = { type -> runCatching { mutableClassDefBy(type) }.getOrNull() },
+    )
     if (fallbackMethods.size != 1) {
         throw PatchException(
             "Expected one NewX submit work handler, found ${fallbackMethods.size}: " +
