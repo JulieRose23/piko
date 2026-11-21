@@ -241,12 +241,11 @@ private fun patchServerErrorConstructors() {
 
 private fun findFallbackSubmitFailureMethods(
     classDefs: Iterable<com.android.tools.smali.dexlib2.iface.ClassDef>,
-    resolveMutableClass: (String) -> MutableClass?,
+    resolveMutableMethods: (String) -> Iterable<MutableMethod>,
 ): List<MutableMethod> {
     val structuralCandidates = mutableListOf<MutableMethod>()
     for (classDef in classDefs) {
-        val mutableClass = resolveMutableClass(classDef.type) ?: continue
-        for (method in mutableClass.methods) {
+        for (method in resolveMutableMethods(classDef.type)) {
             val instructions = method.implementation?.instructions ?: continue
             val throwableIndices = mutableListOf<Int>()
             for ((index, instruction) in instructions.withIndex()) {
@@ -287,7 +286,9 @@ private fun patchSubmitFailureHandler() {
     }
     val fallbackMethods = findFallbackSubmitFailureMethods(
         classDefs = allClasses,
-        resolveMutableClass = { type -> runCatching { mutableClassDefBy(type) }.getOrNull() },
+        resolveMutableMethods = { type ->
+            runCatching { mutableClassDefBy(type).methods }.getOrElse { emptyList() }
+        },
     )
     if (fallbackMethods.size != 1) {
         throw PatchException(
